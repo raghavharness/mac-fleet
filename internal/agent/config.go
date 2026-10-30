@@ -68,8 +68,31 @@ func LoadConfig(path string) (*Config, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	c.dropLegacyDefaults()
 	c.defaults()
 	return &c, nil
+}
+
+// dropLegacyDefaults clears values that v0.1.0 wrote into the config file as
+// defaults. They were not choices, and they stop discovery from the running
+// Nomad process (wrong scheme, wrong config path, unused launchd commands).
+func (c *Config) dropLegacyDefaults() {
+	home, _ := os.UserHomeDir()
+	if c.NomadAddr == "http://127.0.0.1:4646" {
+		c.NomadAddr = ""
+	}
+	if c.NomadConfig == filepath.Join(home, "nomad", "client.hcl") {
+		c.NomadConfig = ""
+	}
+	label := fmt.Sprintf("gui/%d/io.harness.nomad", os.Getuid())
+	for _, cmd := range []*[]string{&c.NomadRestartCmd, &c.NomadStopCmd, &c.NomadStartCmd} {
+		for _, a := range *cmd {
+			if a == label {
+				*cmd = nil
+				break
+			}
+		}
+	}
 }
 
 func (c *Config) Save(path string) error {

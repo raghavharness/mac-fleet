@@ -109,6 +109,13 @@ func nomadState(ctx context.Context, c *Config) wire.NomadState {
 	}
 	if err := nomadGet(ctx, c, "/v1/node/"+id, &node); err != nil {
 		st.NodeID = id
+		// Without an ACL token the servers refuse the node lookup. The client's
+		// own heartbeat still shows whether it is registered and healthy.
+		if heartbeatOK(self.Stats["client"]) {
+			st.Status, st.Eligibility = "ready", "eligible"
+			st.Error = "node details need an ACL token (node:read): set nomad_token in the agent config"
+			return st
+		}
 		st.Error = err.Error()
 		return st
 	}
@@ -156,4 +163,13 @@ func countTartRuns(ctx context.Context) int {
 		return 0
 	}
 	return parseTartRuns(string(out))
+}
+
+// heartbeatOK reports whether the client stats show a recent server heartbeat.
+func heartbeatOK(cl map[string]string) bool {
+	if cl["known_servers"] == "" {
+		return false
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(cl["last_heartbeat"]))
+	return err == nil && d >= 0 && d < 30*time.Second
 }

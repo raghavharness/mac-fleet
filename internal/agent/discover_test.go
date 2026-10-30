@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"testing"
+)
 
 const sampleHCL = `
 # managed by provisioning
@@ -83,5 +87,22 @@ func TestParseTartRuns(t *testing.T) {
 	out := "/opt/homebrew/bin/tart run --no-graphics vm-a\n/usr/local/bin/tart run vm-b\n/usr/local/bin/tart list\n/bin/sh -c tart run x\n"
 	if n := parseTartRuns(out); n != 2 {
 		t.Fatalf("got %d", n)
+	}
+}
+
+func TestDropLegacyDefaults(t *testing.T) {
+	c := &Config{NomadAddr: "http://127.0.0.1:4646", NomadRestartCmd: []string{"launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/io.harness.nomad", os.Getuid())}, NomadStopCmd: []string{"custom", "stop"}}
+	c.dropLegacyDefaults()
+	if c.NomadAddr != "" || c.NomadRestartCmd != nil || len(c.NomadStopCmd) != 2 {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestHeartbeatOK(t *testing.T) {
+	if !heartbeatOK(map[string]string{"known_servers": "1.2.3.4:4647", "last_heartbeat": "4.5s"}) {
+		t.Fatal("recent heartbeat should be ok")
+	}
+	if heartbeatOK(map[string]string{"known_servers": "1.2.3.4:4647", "last_heartbeat": "5m0s"}) || heartbeatOK(map[string]string{"last_heartbeat": "1s"}) {
+		t.Fatal("stale or serverless should not be ok")
 	}
 }
