@@ -770,7 +770,7 @@ const ImagesView = {
   async mount() {
     app.innerHTML = `
     <div class="row"><h1 class="grow">Tart images</h1><button data-act="img-prune">Prune unused</button><button class="primary" data-act="img-pull">Pull image</button></div>
-    <section class="card table"><div class="t th" style="grid-template-columns:2fr 80px 1.4fr 90px 130px 150px"><span>Image</span><span>Size</span><span>On hosts</span><span>In use</span><span>Last used</span><span></span></div>
+    <section class="card table"><div class="t th" style="grid-template-columns:2fr 80px 1.4fr 130px 150px"><span>Image</span><span>Size</span><span>On hosts</span><span>Last used</span><span></span></div>
       <div id="imgs"><div class="t sk"><span class="shim"></span></div><div class="t sk"><span class="shim"></span></div></div></section>
     <div class="cols"><section class="card side" style="flex:1 1 480px"><div class="hd"><h2>Rollouts</h2></div><div id="irolls"></div></section>
     <section class="card side" style="flex:1 1 480px"><div class="hd"><h2>Image by host</h2><select id="matrix-image" style="width:auto;max-width:60%;margin-left:auto" aria-label="Image"></select></div>
@@ -788,13 +788,12 @@ const ImagesView = {
     box.querySelectorAll(".sk").forEach((x) => x.remove());
     box.querySelector(".empty")?.remove();
     if (!images.length) box.innerHTML = `<div class="empty">No images reported yet</div>`;
-    syncList(box, images, (i) => i.name, () => `<div class="t" style="grid-template-columns:2fr 80px 1.4fr 90px 130px 150px">
+    syncList(box, images, (i) => i.name, () => `<div class="t" style="grid-template-columns:2fr 80px 1.4fr 130px 150px">
         <span class="mono n"></span><span class="sz"></span><span class="bar"><span class="track"><span class="fill"></span></span><span class="num" style="width:56px"></span></span>
-        <span class="use"></span><span class="muted last"></span><span class="row act" style="gap:6px;justify-content:flex-end"></span></div>`, (el, im) => {
+        <span class="muted last"></span><span class="row act" style="gap:6px;justify-content:flex-end"></span></div>`, (el, im) => {
       setText($(".n", el), im.name); setText($(".sz", el), Math.round(im.size_gb) + " GB");
       $(".fill", el).style.width = (total_hosts ? (im.host_ids.length / total_hosts) * 100 : 0) + "%";
       setText($(".num", el), `${im.host_ids.length}/${total_hosts}`);
-      setText($(".use", el), `${im.running_vms} VMs`);
       setHTML($(".last", el), im.last_accessed ? agoSpan(im.last_accessed) : "-");
       setHTML($(".act", el), `<button class="small" data-act="img-pull" data-image="${esc(im.name)}">Roll out</button><button class="small danger" data-act="img-delete" data-image="${esc(im.name)}">Delete</button>`);
     });
