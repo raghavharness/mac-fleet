@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: macfleet-server
+    newName: REGION-docker.pkg.dev/PROJECT_ID/macfleet/macfleet-server
+    newTag: latest
+patches:
+  # Replace the placeholders below before the first apply (see deploy/README.md).
+  - target:
+      kind: ConfigMap
+      name: macfleet-config
+    patch: |-
+      - op: replace
+        path: /data/AGENT_HOSTS
+        value: "REPLACE_WITH_AGENT_LB_IP_OR_DNS"
+      - op: replace
+        path: /data/PUBLIC_AGENT_URL
+        value: "https://REPLACE_WITH_AGENT_LB_IP_OR_DNS:8443"
+  - target:
+      kind: Service
+      name: macfleet-agent
+    patch: |-
+      - op: add
+        path: /spec/loadBalancerIP
+        value: "REPLACE_WITH_RESERVED_STATIC_IP"
+  - target:
+      kind: ManagedCertificate
+      name: macfleet-web
+    patch: |-
+      - op: replace
+        path: /spec/domains/0
+        value: macfleet.example.com
+  - target:
+      kind: Ingress
+      name: macfleet-web
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: macfleet.example.com

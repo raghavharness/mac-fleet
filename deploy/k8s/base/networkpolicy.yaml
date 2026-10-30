@@ -1,0 +1,21 @@
+# Only the server and the backup job may reach Postgres. Inert unless the
+# cluster enforces NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-from-server-only
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: macfleet-server
+        - podSelector:
+            matchLabels:
+              app: postgres-backup
+      ports:
+        - port: 5432

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mac Fleet</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="var(--brand)"/><rect x="5" y="5.5" width="14" height="9" rx="1.8" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M9 18.5h6M12 14.5v4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="10" r="1.6" fill="#fff"/></svg>Mac Fleet</div>
+  <nav>
+    <a href="#/" data-nav="fleet">Fleet</a>
+    <a href="#/images" data-nav="images">Images</a>
+    <a href="#/settings" data-nav="settings">Settings</a>
+  </nav>
+  <div class="live"><span class="dot" id="live-dot"></span><span id="live-text">Connecting</span><span class="muted" id="live-ago"></span></div>
+</header>
+<main id="app"></main>
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

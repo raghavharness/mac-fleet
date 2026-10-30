@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: macfleet-server
+spec:
+  replicas: 1
+  # Agents hold long-lived connections; one replica, replaced rather than overlapped.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: macfleet-server
+  template:
+    metadata:
+      labels:
+        app: macfleet-server
+    spec:
+      serviceAccountName: macfleet
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: macfleet-server
+          ports:
+            - name: web
+              containerPort: 8080
+            - name: agent
+              containerPort: 8443
+          envFrom:
+            - configMapRef:
+                name: macfleet-config
+          env:
+            - name: MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: macfleet-secrets
+                  key: MASTER_KEY
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: macfleet-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: postgres://macfleet:$(POSTGRES_PASSWORD)@postgres:5432/macfleet?sslmode=disable
+          readinessProbe:
+            httpGet: { path: /readyz, port: web }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: web }
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+---
+# Dashboard and API, reached through the Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: macfleet-web
+spec:
+  selector:
+    app: macfleet-server
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+---
+# Agent endpoint. Plain TCP load balancer so the server terminates mTLS itself.
+apiVersion: v1
+kind: Service
+metadata:
+  name: macfleet-agent
+spec:
+  type: LoadBalancer
+  selector:
+    app: macfleet-server
+  ports:
+    - name: agent
+      port: 8443
+      targetPort: agent
+  # Firewall rules for the public agent endpoint go here once decided:
+  # loadBalancerSourceRanges: ["203.0.113.0/24"]

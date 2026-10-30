@@ -1,0 +1,8 @@
+dist/
+*.pem
+*.key
+.env
+deploy/k8s/overlays/local/
+CLAUDE.local.md
+_to_delete/
+.github/workflows/

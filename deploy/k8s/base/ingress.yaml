@@ -1,0 +1,29 @@
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: macfleet-web
+spec:
+  domains:
+    - macfleet.example.com
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: macfleet-web
+  annotations:
+    kubernetes.io/ingress.class: gce
+    networking.gke.io/managed-certificates: macfleet-web
+    # kubernetes.io/ingress.global-static-ip-name: macfleet-web
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  rules:
+    - host: macfleet.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: macfleet-web
+                port:
+                  number: 80
