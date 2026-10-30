@@ -733,7 +733,7 @@ const HostView = {
     setText(c("ips"), allIPs(h).join("\n") || "-");
     setText(c("node"), s && s.nomad.node_id ? s.nomad.node_id.slice(0, 8) : "-");
     const nm = s && s.nomad;
-    const how = !nm || !on ? "-" : nm.managed_by === "launchd" ? `launchd${nm.pid ? ` (pid ${nm.pid})` : ""}` : nm.managed_by === "shell" ? `Started from a shell${nm.pid ? ` (pid ${nm.pid})` : ""} <button class="small" data-act="h-adopt">Manage with launchd</button>` : "Not running";
+    const how = !nm || !on ? "-" : nm.managed_by === "launchd" ? `launchd${nm.pid ? ` (pid ${nm.pid})` : ""}` : nm.managed_by === "shell" ? `Started from a shell${nm.pid ? ` (pid ${nm.pid})` : ""} <div class="adopt"><button class="small" data-act="h-adopt">Manage with launchd</button></div>` : "Not running";
     setHTML(c("managed"), how);
     const ne = $("#cfg-warn");
     if (ne) {

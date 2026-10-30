@@ -203,3 +203,6 @@ textarea.cfgtext { width: 100%; height: 360px; resize: vertical; white-space: pr
 pre.diff { max-height: 320px; padding: 10px 12px; }
 pre.diff .da { color: var(--ok); } pre.diff .dr { color: var(--bad); } pre.diff .dg { color: var(--fg2); }
 dd[data-c=ips] { white-space: pre-line; }
+
+dd .adopt { margin-top: 6px; }
+dd .adopt button { width: auto; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; line-height: 1; }
