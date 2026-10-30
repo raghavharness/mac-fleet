@@ -90,3 +90,8 @@ CREATE TABLE IF NOT EXISTS metrics_5m (
   ts timestamptz NOT NULL,
   cpu real, cpu_max real, mem real, mem_max real, disk real, vms real
 ) PARTITION BY RANGE (ts);
+
+ALTER TABLE hosts ADD COLUMN IF NOT EXISTS ips jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE hosts ADD COLUMN IF NOT EXISTS remote_ip text NOT NULL DEFAULT '';
+ALTER TABLE hosts ADD COLUMN IF NOT EXISTS inventory_error text NOT NULL DEFAULT '';
+ALTER TABLE commands ADD COLUMN IF NOT EXISTS result jsonb;

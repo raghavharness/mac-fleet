@@ -8,9 +8,10 @@ import (
 // agentConn is one connected agent. Writes go through the send channel so a
 // single goroutine owns the socket.
 type agentConn struct {
-	hostID string
-	send   chan []byte
-	done   chan struct{}
+	hostID   string
+	remoteIP string
+	send     chan []byte
+	done     chan struct{}
 }
 
 type Hub struct {

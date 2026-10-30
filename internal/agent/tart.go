@@ -43,7 +43,8 @@ func listImages(ctx context.Context, c *Config) ([]wire.Image, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var out, errb bytes.Buffer
-	cmd := exec.CommandContext(ctx, c.TartBin, "list", "--format", "json")
+	cmd := exec.CommandContext(ctx, resolveBin(c.TartBin), "list", "--format", "json")
+	cmd.Env = childEnv()
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("tart list: %w: %s", err, strings.TrimSpace(errb.String()))
@@ -68,6 +69,7 @@ func listImages(ctx context.Context, c *Config) ([]wire.Image, error) {
 // runStreaming runs a command and sends each output line to progress.
 func runStreaming(ctx context.Context, progress func(string), name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = childEnv()
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	if err := cmd.Start(); err != nil {
@@ -111,7 +113,7 @@ func tartPull(ctx context.Context, c *Config, image string, progress func(string
 	if err := validImage(image); err != nil {
 		return err
 	}
-	return runStreaming(ctx, progress, c.TartBin, "pull", image)
+	return runStreaming(ctx, progress, resolveBin(c.TartBin), "pull", image)
 }
 
 func tartDelete(ctx context.Context, c *Config, image string) error {
@@ -128,7 +130,8 @@ func tartDelete(ctx context.Context, c *Config, image string) error {
 		}
 	}
 	var errb bytes.Buffer
-	cmd := exec.CommandContext(ctx, c.TartBin, "delete", image)
+	cmd := exec.CommandContext(ctx, resolveBin(c.TartBin), "delete", image)
+	cmd.Env = childEnv()
 	cmd.Stderr = &errb
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("tart delete: %w: %s", err, strings.TrimSpace(errb.String()))

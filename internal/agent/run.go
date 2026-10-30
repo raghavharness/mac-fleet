@@ -185,6 +185,7 @@ func (a *Agent) sendInventory(ctx context.Context, send sender) {
 	imgs, err := listImages(ctx, a.cfg)
 	if err != nil {
 		log.Printf("inventory: %v", err)
+		send(wire.TypeInventory, "", wire.Inventory{Error: err.Error()})
 		return
 	}
 	a.mu.Lock()
@@ -208,8 +209,8 @@ func (a *Agent) execute(ctx context.Context, cmd wire.Command, send sender) {
 
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
-	msg, err := a.dispatch(cctx, cmd, progress)
-	res := wire.Result{CommandID: cmd.ID, State: wire.StateSucceeded, Message: msg}
+	msg, data, err := a.dispatch(cctx, cmd, progress)
+	res := wire.Result{CommandID: cmd.ID, State: wire.StateSucceeded, Message: msg, Data: data}
 	if err != nil {
 		res.State, res.Message = wire.StateFailed, err.Error()
 	}
@@ -219,43 +220,53 @@ func (a *Agent) execute(ctx context.Context, cmd wire.Command, send sender) {
 	}
 }
 
-func (a *Agent) dispatch(ctx context.Context, cmd wire.Command, progress func(string)) (string, error) {
+func (a *Agent) dispatch(ctx context.Context, cmd wire.Command, progress func(string)) (string, json.RawMessage, error) {
+	plain := func(msg string, err error) (string, json.RawMessage, error) { return msg, nil, err }
 	switch cmd.Type {
 	case wire.CmdNomadRestart:
 		var p wire.NomadRestartParams
 		_ = json.Unmarshal(cmd.Params, &p)
-		return "restarted", nomadRestart(ctx, a.cfg, p, progress)
+		return plain("restarted", nomadRestart(ctx, a.cfg, p, progress))
 	case wire.CmdNomadStop:
-		return "stopped", nomadStop(ctx, a.cfg, progress)
+		return plain("stopped", nomadStop(ctx, a.cfg, progress))
 	case wire.CmdNomadStart:
-		return "started", nomadStart(ctx, a.cfg, progress)
+		return plain("started", nomadStart(ctx, a.cfg, progress))
+	case wire.CmdNomadAdopt:
+		return plain("nomad is now managed by launchd", nomadAdopt(ctx, a.cfg, progress))
+	case wire.CmdNomadConfigRead:
+		d, err := nomadConfigRead(ctx, a.cfg)
+		if err != nil {
+			return "", nil, err
+		}
+		b, _ := json.Marshal(d)
+		return "read " + d.Path, b, nil
 	case wire.CmdNomadConfigApply:
 		var p wire.NomadConfigParams
 		if err := json.Unmarshal(cmd.Params, &p); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return "config applied", nomadConfigApply(ctx, a.cfg, p, progress)
+		return nomadConfigApply(ctx, a.cfg, p, progress)
 	case wire.CmdTartList:
 		imgs, err := listImages(ctx, a.cfg)
-		return fmt.Sprintf("%d images", len(imgs)), err
+		return plain(fmt.Sprintf("%d images", len(imgs)), err)
 	case wire.CmdTartPull:
 		var p wire.TartImageParams
 		if err := json.Unmarshal(cmd.Params, &p); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return "pulled " + p.Image, tartPull(ctx, a.cfg, p.Image, progress)
+		return plain("pulled "+p.Image, tartPull(ctx, a.cfg, p.Image, progress))
 	case wire.CmdTartDelete:
 		var p wire.TartImageParams
 		if err := json.Unmarshal(cmd.Params, &p); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return "deleted " + p.Image, tartDelete(ctx, a.cfg, p.Image)
+		return plain("deleted "+p.Image, tartDelete(ctx, a.cfg, p.Image))
 	case wire.CmdTartPrune:
 		var p wire.TartPruneParams
 		if err := json.Unmarshal(cmd.Params, &p); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return tartPrune(ctx, a.cfg, p, progress)
+		return plain(tartPrune(ctx, a.cfg, p, progress))
 	}
-	return "", errors.New("unsupported command type " + cmd.Type)
+	return "", nil, errors.New("unsupported command type " + cmd.Type)
 }

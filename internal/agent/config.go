@@ -15,13 +15,15 @@ type Config struct {
 	Hostname    string            `json:"hostname"`  // defaults to os hostname
 	Labels      map[string]string `json:"labels"`
 	DataDir     string            `json:"data_dir"`    // holds the key, cert and CA
-	NomadAddr   string            `json:"nomad_addr"`  // local Nomad API
+	NomadAddr   string            `json:"nomad_addr"`  // local Nomad API; found from the Nomad config when empty
 	NomadToken  string            `json:"nomad_token"` // optional, node:read
 	NomadBin    string            `json:"nomad_bin"`
-	NomadConfig string            `json:"nomad_config"` // path of the Nomad client config file
+	NomadConfig string            `json:"nomad_config"` // Nomad config file; found from the running process when empty
+	NomadLabel  string            `json:"nomad_label"`  // launchd label for the Nomad job
 	TartBin     string            `json:"tart_bin"`
 	DiskPath    string            `json:"disk_path"` // volume that holds Tart images
-	// Commands used to manage the Nomad client process. launchctl by default.
+	// Optional overrides for managing Nomad. Empty means launchctl on the
+	// launchd job named by nomad_label.
 	NomadRestartCmd []string `json:"nomad_restart_cmd"`
 	NomadStopCmd    []string `json:"nomad_stop_cmd"`
 	NomadStartCmd   []string `json:"nomad_start_cmd"`
@@ -30,9 +32,6 @@ type Config struct {
 }
 
 func (c *Config) defaults() {
-	if c.NomadAddr == "" {
-		c.NomadAddr = "http://127.0.0.1:4646"
-	}
 	if c.NomadBin == "" {
 		c.NomadBin = "nomad"
 	}
@@ -46,19 +45,8 @@ func (c *Config) defaults() {
 	if c.DiskPath == "" {
 		c.DiskPath = home
 	}
-	if c.NomadConfig == "" {
-		c.NomadConfig = filepath.Join(home, "nomad", "client.hcl")
-	}
-	uid := os.Getuid()
-	label := "io.harness.nomad"
-	if len(c.NomadRestartCmd) == 0 {
-		c.NomadRestartCmd = []string{"launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/%s", uid, label)}
-	}
-	if len(c.NomadStopCmd) == 0 {
-		c.NomadStopCmd = []string{"launchctl", "kill", "SIGTERM", fmt.Sprintf("gui/%d/%s", uid, label)}
-	}
-	if len(c.NomadStartCmd) == 0 {
-		c.NomadStartCmd = []string{"launchctl", "kickstart", fmt.Sprintf("gui/%d/%s", uid, label)}
+	if c.NomadLabel == "" {
+		c.NomadLabel = "io.harness.nomad"
 	}
 	if c.MetricsEverySec <= 0 {
 		c.MetricsEverySec = 15

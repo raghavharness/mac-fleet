@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -120,7 +122,7 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	conn.SetReadLimit(4 << 20)
 
-	ac := &agentConn{hostID: hostID, send: make(chan []byte, 64), done: make(chan struct{})}
+	ac := &agentConn{hostID: hostID, remoteIP: clientIP(r), send: make(chan []byte, 64), done: make(chan struct{})}
 	if old := s.hub.set(ac); old != nil {
 		close(old.done)
 	}
@@ -191,9 +193,13 @@ func (s *Server) handleAgentMessage(ctx context.Context, ac *agentConn, env wire
 			labels = []byte("{}")
 		}
 		// Labels from enrollment are kept; labels from the agent config are merged on top.
+		ips, _ := json.Marshal(h.IPs)
+		if h.IPs == nil {
+			ips = []byte("[]")
+		}
 		s.st.pool.Exec(ctx, `UPDATE hosts SET agent_version=$2, os=$3, cores=$4, mem_gb=$5,
-			labels = labels || $6::jsonb, connected=true, last_seen=now() WHERE id=$1`,
-			hostID, h.Version, h.OS, h.Cores, h.MemGB, labels)
+			labels = labels || $6::jsonb, ips=$7::jsonb, remote_ip=$8, connected=true, last_seen=now() WHERE id=$1`,
+			hostID, h.Version, h.OS, h.Cores, h.MemGB, labels, ips, ac.remoteIP)
 		// Anything still running belonged to the previous agent process.
 		s.st.pool.Exec(ctx, `UPDATE commands SET state='failed', message='agent restarted', updated_at=now()
 			WHERE host_id=$1 AND state='running'`, hostID)
@@ -217,7 +223,12 @@ func (s *Server) handleAgentMessage(ctx context.Context, ac *agentConn, env wire
 			return
 		}
 		b, _ := json.Marshal(inv.Images)
-		s.st.pool.Exec(ctx, `UPDATE hosts SET inventory=$2, last_seen=now() WHERE id=$1`, hostID, b)
+		if inv.Error != "" {
+			// Keep the last good list and show why it could not refresh.
+			s.st.pool.Exec(ctx, `UPDATE hosts SET inventory_error=$2, last_seen=now() WHERE id=$1`, hostID, inv.Error)
+		} else {
+			s.st.pool.Exec(ctx, `UPDATE hosts SET inventory=$2, inventory_error='', last_seen=now() WHERE id=$1`, hostID, b)
+		}
 		s.publishHost(hostID)
 		s.bus.publish("images", "")
 	case wire.TypeProgress:
@@ -231,7 +242,10 @@ func (s *Server) handleAgentMessage(ctx context.Context, ac *agentConn, env wire
 		if json.Unmarshal(env.Payload, &res) != nil || res.CommandID == "" {
 			return
 		}
-		s.setCommandState(ctx, res.CommandID, res.State, res.Message)
+		if len(res.Data) > 0 && res.State == wire.StateSucceeded {
+			s.cacheNomadConfig(ctx, hostID, res)
+		}
+		s.setCommandState(ctx, res.CommandID, res.State, res.Message, res.Data)
 	}
 }
 
@@ -275,3 +289,40 @@ func (s *Server) sendToAgent(hostID string, c wire.Command) bool {
 }
 
 var _ = pgx.ErrNoRows
+
+// clientIP is the address the agent connected from, preferring the proxy
+// header when the server sits behind a load balancer.
+func clientIP(r *http.Request) string {
+	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+		first := strings.TrimSpace(strings.Split(xf, ",")[0])
+		if net.ParseIP(first) != nil {
+			return first
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// cacheNomadConfig remembers the last config read from a host so the
+// dashboard can show it without a round trip.
+func (s *Server) cacheNomadConfig(ctx context.Context, hostID string, res wire.Result) {
+	var d wire.NomadConfigData
+	if json.Unmarshal(res.Data, &d) != nil || d.Path == "" {
+		return
+	}
+	if err := s.st.putSecret(ctx, "nomadcfg:"+hostID, string(res.Data)); err != nil {
+		log.Printf("cache nomad config: %v", err)
+	}
+}
+
+func (s *Server) apiNomadConfig(w http.ResponseWriter, r *http.Request) {
+	raw, err := s.st.getSecret(r.Context(), "nomadcfg:"+r.PathValue("id"))
+	if err != nil || raw == "" {
+		writeJSON(w, 200, map[string]any{"config": nil})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"config": json.RawMessage(raw)})
+}

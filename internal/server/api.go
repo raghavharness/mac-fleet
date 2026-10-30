@@ -50,6 +50,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/hosts", s.apiHosts)
 	mux.HandleFunc("GET /api/hosts/{id}", s.apiHost)
 	mux.HandleFunc("GET /api/hosts/{id}/metrics", s.apiMetrics)
+	mux.HandleFunc("GET /api/hosts/{id}/nomad-config", s.apiNomadConfig)
 	mux.HandleFunc("POST /api/hosts/{id}/commands", s.apiCreateCommand)
 	mux.HandleFunc("POST /api/hosts/{id}/revoke", s.apiRevoke)
 	mux.HandleFunc("GET /api/commands", s.apiCommands)
@@ -191,9 +192,9 @@ func (s *Server) apiCommands(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiCommand(w http.ResponseWriter, r *http.Request) {
 	var c Command
-	err := s.st.pool.QueryRow(r.Context(), `SELECT c.id,c.type,c.host_id,h.name,c.params,c.state,c.message,c.requested_by,coalesce(c.batch_id,''),c.created_at,c.updated_at
+	err := s.st.pool.QueryRow(r.Context(), `SELECT c.id,c.type,c.host_id,h.name,c.params,c.state,c.message,c.requested_by,coalesce(c.batch_id,''),c.created_at,c.updated_at,c.result
 		FROM commands c JOIN hosts h ON h.id=c.host_id WHERE c.id=$1`, r.PathValue("id")).
-		Scan(&c.ID, &c.Type, &c.HostID, &c.HostName, &c.Params, &c.State, &c.Message, &c.RequestedBy, &c.BatchID, &c.CreatedAt, &c.UpdatedAt)
+		Scan(&c.ID, &c.Type, &c.HostID, &c.HostName, &c.Params, &c.State, &c.Message, &c.RequestedBy, &c.BatchID, &c.CreatedAt, &c.UpdatedAt, &c.Result)
 	if err != nil {
 		httpErr(w, 404, fmt.Errorf("command not found"))
 		return

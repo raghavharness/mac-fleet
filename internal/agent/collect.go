@@ -21,7 +21,7 @@ import (
 func pkixName(cn string) pkix.Name { return pkix.Name{CommonName: cn} }
 
 func hello(c *Config, version string) wire.Hello {
-	h := wire.Hello{Hostname: c.Hostname, Version: version, OS: runtime.GOOS + "/" + runtime.GOARCH, Cores: runtime.NumCPU(), Labels: c.Labels}
+	h := wire.Hello{Hostname: c.Hostname, Version: version, OS: runtime.GOOS + "/" + runtime.GOARCH, Cores: runtime.NumCPU(), Labels: c.Labels, IPs: localIPs()}
 	if vm, err := mem.VirtualMemory(); err == nil {
 		h.MemGB = float64(vm.Total) / (1 << 30)
 	}
@@ -59,18 +59,40 @@ func collect(ctx context.Context, c *Config, images []wire.Image) wire.Sample {
 
 func round1(f float64) float64 { return float64(int(f*10+0.5)) / 10 }
 
-// nomadState asks the local Nomad client API for this node's status.
+// nomadState asks the local Nomad client API for this node's status. The
+// address, TLS settings and config path come from the running process when the
+// agent config does not say.
 func nomadState(ctx context.Context, c *Config) wire.NomadState {
-	var st wire.NomadState
+	info := discoverNomad(ctx, c)
+	st := wire.NomadState{Addr: info.Addr, ConfigPath: info.ConfigPath, ManagedBy: "none"}
+	if info.Proc != nil {
+		st.Pid = info.Proc.Pid
+		st.ManagedBy = "shell"
+	}
+	if len(c.NomadRestartCmd) == 0 && launchdLoaded(ctx, c) {
+		st.ManagedBy = "launchd"
+	}
 	var self struct {
 		Stats map[string]map[string]string `json:"stats"`
 	}
 	if err := nomadGet(ctx, c, "/v1/agent/self", &self); err != nil {
+		// The node details need agent:read; the health endpoint may still answer.
+		var health map[string]any
+		if herr := nomadGet(ctx, c, "/v1/agent/health", &health); herr == nil {
+			st.Reachable = true
+			st.Error = "node status unavailable: " + err.Error()
+			return st
+		}
+		st.Error = err.Error()
+		if info.Proc == nil {
+			st.Error = "no nomad process found; " + st.Error
+		}
 		return st
 	}
 	st.Reachable = true
 	id := self.Stats["client"]["node_id"]
 	if id == "" {
+		st.Error = "agent is not running as a client"
 		return st
 	}
 	var node struct {
@@ -79,6 +101,8 @@ func nomadState(ctx context.Context, c *Config) wire.NomadState {
 		Drain                 bool   `json:"Drain"`
 	}
 	if err := nomadGet(ctx, c, "/v1/node/"+id, &node); err != nil {
+		st.NodeID = id
+		st.Error = err.Error()
 		return st
 	}
 	st.NodeID, st.Status, st.Eligibility, st.Draining = id, node.Status, node.SchedulingEligibility, node.Drain
@@ -86,16 +110,17 @@ func nomadState(ctx context.Context, c *Config) wire.NomadState {
 }
 
 func nomadGet(ctx context.Context, c *Config, path string, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	info := discoverNomad(ctx, c)
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.NomadAddr, "/")+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(info.Addr, "/")+path, nil)
 	if err != nil {
 		return err
 	}
 	if c.NomadToken != "" {
 		req.Header.Set("X-Nomad-Token", c.NomadToken)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := info.Client.Do(req)
 	if err != nil {
 		return err
 	}

@@ -144,10 +144,14 @@ function clearBar(el) {
   el.lastElementChild._v = undefined;
 }
 
+const managedTag = (h) => {
+  const m = h.sample && h.sample.nomad && h.sample.nomad.managed_by;
+  return m && m !== "none" && h.status === "online" ? `<span class="muted tiny">${m === "launchd" ? "launchd" : "shell"}</span>` : "";
+};
 function nomadBadge(h) {
   if (h.status !== "online" || !h.sample) return `<span class="badge mute">unknown</span>`;
   const n = h.sample.nomad;
-  if (!n.reachable) return `<span class="badge warn">unreachable</span>`;
+  if (!n.reachable) return `<span class="badge warn" title="${esc(n.error || "")}">unreachable</span>`;
   if (n.draining) return `<span class="badge warn live">draining</span>`;
   if (n.status === "down") return `<span class="badge bad">down</span>`;
   if (n.eligibility === "ineligible") return `<span class="badge warn">ineligible</span>`;
@@ -243,7 +247,7 @@ window.addEventListener("hashchange", route);
 // =====================================================================
 // Fleet
 // =====================================================================
-const COLS = "36px minmax(170px,1.5fr) 104px 112px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 64px 84px 88px";
+const COLS = "36px minmax(170px,1.4fr) minmax(120px,.9fr) 104px 112px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 64px 84px 88px";
 const SORTS = {
   name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }),
   cpu: (a, b) => (b.sample ? b.sample.cpu_pct : -1) - (a.sample ? a.sample.cpu_pct : -1),
@@ -264,7 +268,7 @@ const FleetView = {
     </div>
     <section class="card"><div class="hd"><h2>Active alerts</h2><span class="muted" id="alert-n"></span></div><div id="alerts"></div></section>
     <div class="row">
-      <input id="q" type="search" placeholder="Search hosts   ( / )" value="${esc(S.q)}" style="max-width:300px" aria-label="Search hosts">
+      <input id="q" type="search" placeholder="Search by host or IP   ( / )" value="${esc(S.q)}" style="max-width:300px" aria-label="Search by host or IP">
       <select id="f-status" style="width:auto" aria-label="Status filter"><option value="all">Status: all</option><option value="online">Online</option><option value="offline">Offline</option></select>
       <select id="f-pool" style="width:auto" aria-label="Pool filter"></select>
       <span class="grow"></span>
@@ -272,7 +276,7 @@ const FleetView = {
     </div>
     <section class="card table">
       <div class="t th" style="grid-template-columns:${COLS}"><span><input type="checkbox" id="sel-all" aria-label="Select all shown"></span>
-        <button class="th-b" data-sort="name">Host</button><span>Agent</span><span>Nomad</span>
+        <button class="th-b" data-sort="name">Host</button><span>IP</span><span>Agent</span><span>Nomad</span>
         <button class="th-b" data-sort="cpu">CPU</button><button class="th-b" data-sort="mem">Memory</button><button class="th-b" data-sort="disk">Disk used</button><span>VMs</span><span>Version</span><button class="th-b" data-sort="seen">Last seen</button></div>
       <div id="rows"></div>
       <div id="rows-empty" class="empty" hidden></div>
@@ -341,7 +345,7 @@ const FleetView = {
   },
   match(h) {
     const q = S.q.trim().toLowerCase();
-    return (S.status === "all" || h.status === S.status) && (S.pool === "all" || (h.labels || {}).pool === S.pool) && (!q || h.name.toLowerCase().includes(q));
+    return (S.status === "all" || h.status === S.status) && (S.pool === "all" || (h.labels || {}).pool === S.pool) && (!q || h.name.toLowerCase().includes(q) || allIPs(h).some((ip) => ip.includes(q)));
   },
   applyFilter() {
     let shown = 0;
@@ -409,24 +413,33 @@ const FleetView = {
   },
 };
 
+const allIPs = (h) => [...new Set([h.remote_ip, ...(h.ips || [])].filter(Boolean))];
+function ipCell(h) {
+  const all = allIPs(h);
+  if (!all.length) return `<span class="muted">-</span>`;
+  const main = (h.ips || [])[0] || all[0];
+  const more = all.filter((x) => x !== main);
+  return `<span class="mono">${esc(main)}</span>${more.length ? `<div class="muted tiny mono" title="${esc(all.join(", "))}">${esc(more.join(", "))}</div>` : ""}`;
+}
 function rowHTML(h) {
   return `<div class="t hostrow" style="grid-template-columns:${COLS}">
     <span><input type="checkbox" data-sel="${h.id}" aria-label="Select ${esc(h.name)}"></span>
     <span><a class="mono name" href="#/host/${h.id}"></a><div class="muted pool"></div></span>
-    <span class="agent"></span><span class="nomad"></span>
+    <span class="ips"></span><span class="agent"></span><span class="nomad"></span>
     <span>${barHTML("cpu")}</span><span>${barHTML("mem")}</span><span>${barHTML("disk")}</span>
     <span class="vms"></span><span class="mono muted ver"></span><span class="seen"></span></div>`;
 }
 function patchRow(el, h) {
   const s = h.sample, on = h.status === "online";
-  const sig = JSON.stringify([on, s && s.nomad.status, s && s.nomad.draining, s && s.nomad.eligibility, s && s.nomad.reachable]);
+  const sig = JSON.stringify([on, s && s.nomad.status, s && s.nomad.draining, s && s.nomad.eligibility, s && s.nomad.reachable, s && s.nomad.managed_by]);
   const first = !el._init;
   el._init = true;
   const nameEl = $(".name", el); setText(nameEl, h.name);
   setText($(".pool", el), (h.labels || {}).pool || "");
   el.classList.toggle("offline", !on);
   setHTML($(".agent", el), `<span class="dot ${on ? "ok" : "bad"}"></span> ${on ? "Online" : "Offline"}`);
-  setHTML($(".nomad", el), nomadBadge(h));
+  setHTML($(".ips", el), ipCell(h));
+  setHTML($(".nomad", el), nomadBadge(h) + " " + managedTag(h));
   const bars = { cpu: [70, 90, s && s.cpu_pct], mem: [80, 90, s && s.mem_pct], disk: [80, 90, s && s.disk_used_pct] };
   for (const k in bars) { const b = $(`[data-c="${k}"]`, el), [w, bd, v] = bars[k]; s ? setBar(b, v, w, bd) : clearBar(b); }
   setText($(".vms", el), s ? `${s.vms_running} / 2` : "-");
@@ -635,13 +648,19 @@ const HostView = {
       <section class="card"><div class="hd"><h2 class="grow">Metrics</h2><span class="muted live-note" id="live-note"></span>
         <div class="seg" role="group" aria-label="Time range">${["1h", "24h", "7d", "30d"].map((r) => `<button data-act="range" data-r="${r}" class="${S.range === r ? "on" : ""}">${r}</button>`).join("")}</div></div>
         <div class="charts"><div id="ch-cpu"></div><div id="ch-mem"></div><div id="ch-disk"></div><div id="ch-vms"></div></div></section>
+      <section class="card" id="cfg-card"><div class="hd"><h2 class="grow">Nomad config</h2><span class="muted" id="cfg-meta"></span><button class="small" data-act="cfg-load"><span class="lbl">Load from host</span></button></div>
+        <div class="bd"><div class="warnbox" id="cfg-warn" hidden></div>
+          <textarea id="cfg-text" class="cfgtext" spellcheck="false" placeholder="Click Load from host to read the file Nomad is running with"></textarea>
+          <div class="row" style="margin-top:10px"><button data-act="cfg-reset">Reset</button><span class="grow muted" id="cfg-status"></span>
+            <button data-act="cfg-validate"><span class="lbl">Validate</span></button><button data-act="cfg-save"><span class="lbl">Save</span></button><button class="primary" data-act="cfg-saverestart"><span class="lbl">Save and restart</span></button></div></div></section>
       <section class="card"><div class="hd"><h2>Command history</h2></div><div class="table" id="hcmds"></div></section>
     </div><aside class="side">
       <section class="card"><div class="hd"><h2>Host</h2></div><dl>
-        <dt>Pool</dt><dd data-c="pool">-</dd><dt>Agent version</dt><dd class="mono" data-c="ver">-</dd><dt>Nomad node</dt><dd class="mono" data-c="node">-</dd>
+        <dt>Pool</dt><dd data-c="pool">-</dd><dt>Agent version</dt><dd class="mono" data-c="ver">-</dd><dt>IP addresses</dt><dd class="mono" data-c="ips">-</dd><dt>Nomad node</dt><dd class="mono" data-c="node">-</dd>
+        <dt>Nomad process</dt><dd data-c="managed">-</dd>
         <dt>Uptime</dt><dd data-c="uptime">-</dd><dt>Cores, memory</dt><dd data-c="hw">-</dd><dt>Free on volume</dt><dd data-c="free">-</dd><dt>Load (1m)</dt><dd data-c="load">-</dd><dt>Last seen</dt><dd data-c="seen">-</dd></dl>
         <div class="bd" style="padding-top:0"><button class="danger small" data-act="h-revoke">Revoke host</button></div></section>
-      <section class="card"><div class="hd"><h2 class="grow">Tart images</h2><a href="#/images">All images</a></div><div id="inv"></div></section></aside></div>`;
+      <section class="card"><div class="hd"><h2 class="grow">Tart images</h2><a href="#/images">All images</a></div><div class="bd warnbox" id="inv-err" hidden></div><div id="inv"></div></section></aside></div>`;
     const mk = (id, o) => new Chart($(id), o);
     const pct = (v) => Math.round(v) + "%";
     this.charts = {
@@ -651,8 +670,11 @@ const HostView = {
       vms: mk("#ch-vms", { key: "vms", title: "Running VMs", max: 2, fmt: (v) => v.toFixed(1), ticks: [0, 1, 2] }),
     };
     this.cmds = [];
+    this.cfg = { base: null, path: "", writable: true };
+    $("#cfg-text").oninput = () => cfgStatus();
     const h = S.hosts.get(id);
     if (h) { this.host = h; this.paint(h); }
+    cfgLoadCached(id);
     const [det] = await Promise.all([api("GET", `/api/hosts/${id}`), this.loadMetrics()]);
     if (S.view !== this) return;
     S.hosts.set(id, det.host); this.host = det.host; this.paint(det.host);
@@ -708,7 +730,21 @@ const HostView = {
     app.querySelectorAll("[data-c=actions] button:not(.primary)").forEach((b) => (b.disabled = !on));
     setText(c("pool"), (h.labels || {}).pool || "-");
     setText(c("ver"), h.agent_version || "-");
+    setText(c("ips"), allIPs(h).join("\n") || "-");
     setText(c("node"), s && s.nomad.node_id ? s.nomad.node_id.slice(0, 8) : "-");
+    const nm = s && s.nomad;
+    const how = !nm || !on ? "-" : nm.managed_by === "launchd" ? `launchd${nm.pid ? ` (pid ${nm.pid})` : ""}` : nm.managed_by === "shell" ? `Started from a shell${nm.pid ? ` (pid ${nm.pid})` : ""} <button class="small" data-act="h-adopt">Manage with launchd</button>` : "Not running";
+    setHTML(c("managed"), how);
+    const ne = $("#cfg-warn");
+    if (ne) {
+      const msgs = [];
+      if (nm && nm.error && on) msgs.push("Nomad API: " + nm.error);
+      if (nm && nm.managed_by === "shell" && on) msgs.push("Nomad is not under launchd, so a restart after saving is skipped until you use Manage with launchd.");
+      if (this.cfg && this.cfg.base !== null && !this.cfg.writable) msgs.push("The file is not writable by the agent user. Change its permissions to save from here.");
+      ne.hidden = !msgs.length; ne.textContent = msgs.join(" ");
+    }
+    const ie = $("#inv-err");
+    ie.hidden = !h.inventory_error; ie.textContent = h.inventory_error ? "Could not read Tart images: " + h.inventory_error : "";
     setText(c("uptime"), s ? Math.floor(s.uptime_sec / 86400) + " days" : "-");
     setText(c("hw"), `${h.cores} cores, ${Math.round(h.mem_gb)} GB`);
     s ? setNum(c("free"), s.disk_free_gb, (v) => Math.round(v) + " GB") : setText(c("free"), "-");
@@ -869,6 +905,95 @@ const SettingsView = {
 // =====================================================================
 // Actions
 // =====================================================================
+function needLaunchd() {
+  const n = state_host && state_host.sample && state_host.sample.nomad;
+  if (n && n.managed_by === "shell") throw new Error("Nomad was started from a shell. Use Manage with launchd first.");
+}
+async function withBusy(el, fn) {
+  el.disabled = true; el.classList.add("busy");
+  try { return await fn(); } finally { el.disabled = false; el.classList.remove("busy"); }
+}
+// Sends a command and waits for it to finish, returning the final command.
+async function runAndWait(hostId, type, params, override, timeoutMs = 300000) {
+  const c = await api("POST", `/api/hosts/${hostId}/commands`, { type, params, override_limit: !!override });
+  const v = S.view;
+  if (v && v.cmds && c && c.id) { v.cmds = [c, ...v.cmds.filter((x) => x.id !== c.id)]; v.paintCmds && v.paintCmds(); }
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    await new Promise((r) => setTimeout(r, 700));
+    const { command } = await api("GET", `/api/commands/${c.id}`);
+    if (["succeeded", "failed", "expired"].includes(command.state)) return command;
+  }
+  throw new Error("Timed out waiting for the host");
+}
+
+function lineDiff(a, b) {
+  const x = a.split("\n"), y = b.split("\n");
+  const n = x.length, m = y.length;
+  if (n * m > 4e6) return [{ t: "-", s: "(file too large to diff)" }];
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n && j < m) { if (x[i] === y[j]) { out.push({ t: " ", s: x[i] }); i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) out.push({ t: "-", s: x[i++] }); else out.push({ t: "+", s: y[j++] }); }
+  while (i < n) out.push({ t: "-", s: x[i++] });
+  while (j < m) out.push({ t: "+", s: y[j++] });
+  return out;
+}
+function diffHTML(a, b) {
+  const d = lineDiff(a, b), keep = new Set();
+  d.forEach((l, i) => { if (l.t !== " ") for (let k = Math.max(0, i - 2); k <= Math.min(d.length - 1, i + 2); k++) keep.add(k); });
+  let html = "", gap = false;
+  d.forEach((l, i) => {
+    if (!keep.has(i)) { gap = true; return; }
+    if (gap) { html += `<span class="dg">...</span>\n`; gap = false; }
+    html += `<span class="d${l.t === "+" ? "a" : l.t === "-" ? "r" : "c"}">${l.t} ${esc(l.s)}</span>\n`;
+  });
+  return { html, changed: d.some((l) => l.t !== " ") };
+}
+function cfgStatus() {
+  const v = S.view; if (!v || !v.cfg) return;
+  const dirty = v.cfg.base !== null && $("#cfg-text").value !== v.cfg.base;
+  $("#cfg-status").textContent = v.cfg.base === null ? "" : dirty ? "Unsaved changes" : "Matches the host";
+}
+function cfgSet(d) {
+  const v = S.view; if (!v || !v.cfg) return;
+  v.cfg = { base: d.content, path: d.path, writable: d.writable !== false };
+  $("#cfg-text").value = d.content;
+  setText($("#cfg-meta"), d.path + (d.mod_time ? "   " + new Date(d.mod_time).toLocaleString() : ""));
+  cfgStatus();
+  if (state_host) v.paint(state_host);
+}
+async function cfgLoadCached(id) {
+  try {
+    const r = await api("GET", `/api/hosts/${id}/nomad-config`);
+    if (S.view && S.view.id === id && r.config && S.view.cfg.base === null) cfgSet(r.config);
+  } catch (_) { /* optional */ }
+}
+async function cfgLoadFromHost(el) {
+  const v = S.view, h = state_host;
+  const c = await withBusy(el, () => runAndWait(h.id, "nomad.config.read", {}));
+  if (c.state !== "succeeded") throw new Error(c.message);
+  if (S.view !== v) return;
+  cfgSet(c.result);
+  toast("Loaded from host");
+}
+async function cfgSave(restart) {
+  const v = S.view, h = state_host, text = $("#cfg-text").value;
+  if (v.cfg.base === null) throw new Error("Load the config from the host first");
+  const d = diffHTML(v.cfg.base, text);
+  if (!d.changed && !restart) throw new Error("No changes to save");
+  const warn = `<div class="warnbox">If this file is managed by a provisioning tool such as Ansible, the next run can overwrite what you save here.</div>`;
+  openDialog(restart ? `Save and restart Nomad: ${h.name}` : `Save Nomad config: ${h.name}`,
+    `<p class="muted">${esc(v.cfg.path)}. The agent validates first, keeps a backup, and ${restart ? "rolls back if the node does not return ready" : "does not restart Nomad"}.</p>${warn}
+     <pre class="log diff">${d.changed ? d.html : "No changes"}</pre>${restart ? overrideField : ""}`,
+    async (f) => {
+      const c = await runAndWait(h.id, "nomad.config.apply", { content: text, restart }, !!f.override_limit);
+      if (c.state !== "succeeded") throw new Error(c.message);
+      if (c.result) cfgSet(c.result); else { v.cfg.base = text; cfgStatus(); }
+      toast(c.message || "Saved");
+    }, restart ? "Save and restart" : "Save", restart);
+}
+
 const acts = {
   "bulk-clear": () => { [...S.sel].forEach((id) => S.view.select(id, false)); S.view.renderBulk(); },
   range: (el) => {
@@ -896,19 +1021,32 @@ const acts = {
     openDialog(`${toEligible ? "Set eligible" : "Set ineligible"}: ${h.name}`, `<p class="muted">${toEligible ? "The node will receive new allocations again." : "The node keeps running allocations but receives no new ones."}</p>${toEligible ? "" : overrideField}`,
       async (f) => hostCmd(h.id, "nomad.eligibility", { eligible: toEligible }, !!f.override_limit), "Confirm");
   },
-  "h-restart": () => confirmHost("Restart Nomad", "nomad.restart", {}, "The client restarts and the agent waits for it to rejoin as ready."),
+  "h-restart": () => { needLaunchd(); confirmHost("Restart Nomad", "nomad.restart", {}, "The client restarts through launchd and the agent waits for it to rejoin as ready."); },
   "h-nomadctl": () => {
+    needLaunchd();
     const h = state_host;
     openDialog(`Stop or start Nomad: ${h.name}`, `${field("Action", `<select id="op" name="op"><option value="nomad.stop">Stop the client</option><option value="nomad.start">Start the client</option></select>`, "op")}
       <p class="muted">Drain first if allocations are running.</p>${field("Type the host name to confirm", `<input id="confirm" name="confirm" type="text" autocomplete="off" placeholder="${esc(h.name)}">`, "confirm")}${overrideField}`,
       async (f) => { if (f.confirm !== h.name) throw new Error("Host name does not match"); await hostCmd(h.id, f.op, {}, !!f.override_limit); }, "Run", true);
   },
-  "h-config": () => {
+  "h-config": () => { const c = $("#cfg-card"); c.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" }); if (S.view.cfg && S.view.cfg.base === null) acts["cfg-load"]($("[data-act=cfg-load]")); },
+  "h-adopt": () => {
     const h = state_host;
-    openDialog(`Update Nomad config: ${h.name}`, `<p class="muted">The agent validates the file, keeps the previous one as a backup, and rolls back if the node does not return ready.</p>
-      ${field("Client config (HCL)", `<textarea id="content" name="content" required spellcheck="false"></textarea>`, "content")}<label class="check"><input type="checkbox" name="restart" checked> Restart Nomad after writing</label>${overrideField}`,
-      async (f) => hostCmd(h.id, "nomad.config.apply", { content: f.content, restart: !!f.restart }, !!f.override_limit), "Apply");
+    openDialog(`Manage Nomad with launchd: ${h.name}`, `<p class="muted">Creates a launchd job that runs the same command line and PATH as the running Nomad. The current process is stopped gracefully, the job is started, and if the node does not come back ready the original command is started again. Drain first if allocations are running.</p>
+      ${field("Type the host name to confirm", `<input id="confirm" name="confirm" type="text" autocomplete="off" placeholder="${esc(h.name)}">`, "confirm")}${overrideField}`,
+      async (f) => { if (f.confirm !== h.name) throw new Error("Host name does not match"); await hostCmd(h.id, "nomad.service.install", {}, !!f.override_limit); }, "Take over", true);
   },
+  "cfg-load": (el) => cfgLoadFromHost(el),
+  "cfg-reset": () => { const v = S.view; if (v.cfg.base !== null) { $("#cfg-text").value = v.cfg.base; cfgStatus(); } },
+  "cfg-validate": async (el) => {
+    const h = state_host, text = $("#cfg-text").value;
+    const c = await withBusy(el, () => runAndWait(h.id, "nomad.config.apply", { content: text, validate_only: true }));
+    $("#cfg-status").textContent = c.state === "succeeded" ? "Config is valid" : "Invalid: " + c.message;
+    if (c.state !== "succeeded") throw new Error(c.message);
+    toast("Config is valid");
+  },
+  "cfg-save": (el) => cfgSave(false),
+  "cfg-saverestart": (el) => cfgSave(true),
   "h-pull": () => {
     const h = state_host;
     openDialog(`Pull image on ${h.name}`, field("Image", `<input id="image" name="image" type="text" required placeholder="registry/name:tag">`, "image"), async (f) => hostCmd(h.id, "tart.pull", { image: f.image.trim() }), "Pull");
@@ -1024,7 +1162,7 @@ document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-act]");
   if (!el || el.disabled) return;
   const fn = acts[el.dataset.act];
-  if (fn) Promise.resolve(fn(el)).catch((err) => toast(err.message, true));
+  if (fn) Promise.resolve().then(() => fn(el)).catch((err) => toast(err.message, true));
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "/" && !/input|textarea|select/i.test(document.activeElement.tagName) && $("#q")) { e.preventDefault(); $("#q").focus(); }

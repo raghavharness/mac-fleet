@@ -20,6 +20,7 @@ type Command struct {
 	Params      json.RawMessage `json:"params"`
 	State       string          `json:"state"`
 	Message     string          `json:"message"`
+	Result      json.RawMessage `json:"result,omitempty"`
 	RequestedBy string          `json:"requested_by"`
 	BatchID     string          `json:"batch_id,omitempty"`
 	CreatedAt   time.Time       `json:"created_at"`
@@ -30,7 +31,7 @@ var imageNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$`)
 
 func agentCommand(t string) bool {
 	switch t {
-	case wire.CmdNomadRestart, wire.CmdNomadStop, wire.CmdNomadStart, wire.CmdNomadConfigApply,
+	case wire.CmdNomadRestart, wire.CmdNomadStop, wire.CmdNomadStart, wire.CmdNomadConfigApply, wire.CmdNomadConfigRead, wire.CmdNomadAdopt,
 		wire.CmdTartList, wire.CmdTartPull, wire.CmdTartDelete, wire.CmdTartPrune:
 		return true
 	}
@@ -45,12 +46,12 @@ func knownCommand(t string) bool { return agentCommand(t) || serverCommand(t) }
 // subject to the blast-radius limit.
 func takesNodeOut(t string, params json.RawMessage) bool {
 	switch t {
-	case wire.CmdNomadDrain, wire.CmdNomadStop, wire.CmdNomadRestart:
+	case wire.CmdNomadDrain, wire.CmdNomadStop, wire.CmdNomadRestart, wire.CmdNomadAdopt:
 		return true
 	case wire.CmdNomadConfigApply:
 		var p wire.NomadConfigParams
 		_ = json.Unmarshal(params, &p)
-		return p.Restart
+		return p.Restart && !p.ValidateOnly
 	case wire.CmdNomadEligibility:
 		var p struct {
 			Eligible bool `json:"eligible"`
@@ -169,10 +170,15 @@ func terminal(state string) bool {
 	return state == wire.StateSucceeded || state == wire.StateFailed || state == wire.StateExpired
 }
 
-func (s *Server) setCommandState(ctx context.Context, id, state, msg string) {
+func (s *Server) setCommandState(ctx context.Context, id, state, msg string, data ...json.RawMessage) {
+	var res any
+	if len(data) > 0 && len(data[0]) > 0 {
+		res = []byte(data[0])
+	}
 	// Never move a command out of a terminal state.
-	_, err := s.st.pool.Exec(ctx, `UPDATE commands SET state=$2, message=CASE WHEN $3='' THEN message ELSE $3 END, updated_at=now()
-		WHERE id=$1 AND state NOT IN ('succeeded','failed','expired')`, id, state, msg)
+	_, err := s.st.pool.Exec(ctx, `UPDATE commands SET state=$2, message=CASE WHEN $3='' THEN message ELSE $3 END,
+		result=coalesce($4::jsonb, result), updated_at=now()
+		WHERE id=$1 AND state NOT IN ('succeeded','failed','expired')`, id, state, msg, res)
 	if err != nil {
 		log.Printf("update command %s: %v", id, err)
 		return
