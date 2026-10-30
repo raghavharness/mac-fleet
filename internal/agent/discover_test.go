@@ -78,3 +78,10 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestParseTartRuns(t *testing.T) {
+	out := "/opt/homebrew/bin/tart run --no-graphics vm-a\n/usr/local/bin/tart run vm-b\n/usr/local/bin/tart list\n/bin/sh -c tart run x\n"
+	if n := parseTartRuns(out); n != 2 {
+		t.Fatalf("got %d", n)
+	}
+}

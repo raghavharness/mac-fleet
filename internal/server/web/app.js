@@ -773,8 +773,8 @@ const ImagesView = {
     <section class="card table"><div class="t th" style="grid-template-columns:2fr 80px 1.4fr 90px 130px 150px"><span>Image</span><span>Size</span><span>On hosts</span><span>In use</span><span>Last used</span><span></span></div>
       <div id="imgs"><div class="t sk"><span class="shim"></span></div><div class="t sk"><span class="shim"></span></div></div></section>
     <div class="cols"><section class="card side" style="flex:1 1 480px"><div class="hd"><h2>Rollouts</h2></div><div id="irolls"></div></section>
-    <section class="card side" style="flex:1 1 480px"><div class="hd"><h2>Image by host</h2><select id="matrix-image" style="width:auto;margin-left:auto" aria-label="Image"></select></div>
-      <div class="bd"><div class="matrix" id="matrix"></div><div class="muted" style="margin-top:12px;font-size:13px">Filled: image present. Outline: missing. Faded: host offline.</div></div></section></div>`;
+    <section class="card side" style="flex:1 1 480px"><div class="hd"><h2>Image by host</h2><select id="matrix-image" style="width:auto;max-width:60%;margin-left:auto" aria-label="Image"></select></div>
+      <div class="bd"><div class="matrix" id="matrix"></div><div class="muted" style="margin-top:12px;font-size:13px">Green: image present. Outline: missing. Faded: host offline. Click a host to open it.</div></div></section></div>`;
     $("#matrix-image").onchange = () => this.drawMatrix();
     await this.refresh();
   },
@@ -813,7 +813,11 @@ const ImagesView = {
     if (!this.data) return;
     const { images, hosts } = this.data;
     const im = images.find((i) => i.name === $("#matrix-image").value);
-    $("#matrix").innerHTML = hosts.map((h) => `<div class="cell ${im && im.host_ids.includes(h.id) ? "have" : ""} ${h.status !== "online" ? "off" : ""}" title="${esc(h.name)}"></div>`).join("");
+    $("#matrix").innerHTML = hosts.map((h) => {
+      const have = !!(im && im.host_ids.includes(h.id));
+      return `<a class="mcell ${h.status !== "online" ? "off" : ""}" href="#/host/${h.id}" title="${esc(h.name)}"><span class="cell ${have ? "have" : ""}"></span>
+        <span class="mn"><span class="mono">${esc(h.name)}</span><span class="muted tiny">${have ? "present" : "missing"}${h.status !== "online" ? ", host offline" : ""}</span></span></a>`;
+    }).join("");
   },
   soon: debounce(function () { if (S.view && S.view.data !== undefined && S.view.refresh && S.view.drawMatrix) S.view.refresh(); }, 600),
   onEvent(m) { if (m.kind === "batch" || m.kind === "images" || m.kind === "command") this.soon(); },

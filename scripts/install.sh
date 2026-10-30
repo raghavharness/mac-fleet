@@ -96,9 +96,21 @@ say "Installing the LaunchAgent"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-if ! launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then
-  launchctl load -w "$PLIST"
+# bootout is asynchronous; bootstrapping before it finishes fails with "Input/output error".
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
+  sleep 1
+done
+ok=0
+for _ in 1 2 3; do
+  if launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then ok=1; break; fi
+  sleep 2
+done
+if [ "$ok" = 0 ] && launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then ok=1; fi
+if [ "$ok" = 0 ]; then
+  launchctl load -w "$PLIST" 2>/dev/null && ok=1
 fi
+[ "$ok" = 1 ] || die "could not load the LaunchAgent (is a GUI user session logged in for $(id -un)?). Try: launchctl bootstrap $DOMAIN $PLIST"
 launchctl kickstart -k "$DOMAIN/$LABEL" 2>/dev/null || true
 
 say "Done. The agent should appear in the dashboard within a few seconds."

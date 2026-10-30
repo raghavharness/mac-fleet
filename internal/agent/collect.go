@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -52,6 +54,11 @@ func collect(ctx context.Context, c *Config, images []wire.Image) wire.Sample {
 		if im.Running {
 			s.VMsRunning++
 		}
+	}
+	// Short-lived VMs can start and stop between inventory refreshes, so also
+	// count the `tart run` processes that exist right now.
+	if n := countTartRuns(ctx); n > s.VMsRunning {
+		s.VMsRunning = n
 	}
 	s.Nomad = nomadState(ctx, c)
 	return s
@@ -129,4 +136,24 @@ func nomadGet(ctx context.Context, c *Config, path string, out any) error {
 		return fmt.Errorf("nomad %s: %s", path, resp.Status)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// parseTartRuns counts `tart run` commands in `ps -axo args=` output.
+func parseTartRuns(out string) int {
+	n := 0
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 2 && filepath.Base(f[0]) == "tart" && f[1] == "run" {
+			n++
+		}
+	}
+	return n
+}
+
+func countTartRuns(ctx context.Context) int {
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "args=").Output()
+	if err != nil {
+		return 0
+	}
+	return parseTartRuns(string(out))
 }
