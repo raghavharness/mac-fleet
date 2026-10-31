@@ -342,15 +342,26 @@ func (s *Server) apiTestCluster(w http.ResponseWriter, r *http.Request) {
 	}
 	nc, err := newNomadClient(req.Addr, req.TLSServerName, vals["token"], vals["ca"], vals["cert"], vals["key"])
 	if err == nil {
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 		defer cancel()
 		err = nc.ping(ctx)
 	}
-	if err != nil {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+	if err == nil {
+		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true})
+	// The server often cannot reach Nomad; try from a Mac in the cluster. The
+	// Mac uses its own Nomad API, so certificate files are not needed there.
+	if ex, xerr := s.pickExecutor(r.Context(), req.ID, ""); xerr == nil {
+		if msg, perr := s.pingViaHost(r.Context(), ex.ID, ex.Name, vals["token"]); perr == nil {
+			writeJSON(w, 200, map[string]any{"ok": true, "via": ex.Name, "note": msg})
+			return
+		} else {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": fmt.Sprintf("from %s: %v", ex.Name, perr)})
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error() + " (and no online Mac could test it either)"})
 }
 
 func (s *Server) apiAssignCluster(w http.ResponseWriter, r *http.Request) {

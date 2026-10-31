@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // nomadClient talks to the Nomad server API with the ACL token held by this
@@ -53,69 +52,4 @@ func (n *nomadClient) do(ctx context.Context, method, path string, body, out any
 func (n *nomadClient) ping(ctx context.Context) error {
 	var leader string
 	return n.do(ctx, http.MethodGet, "/v1/status/leader", nil, &leader)
-}
-
-type nomadNode struct {
-	ID          string `json:"ID"`
-	Name        string `json:"Name"`
-	Status      string `json:"Status"`
-	Eligibility string `json:"SchedulingEligibility"`
-	Drain       bool   `json:"Drain"`
-}
-
-func (n *nomadClient) node(ctx context.Context, id string) (nomadNode, error) {
-	var nd nomadNode
-	err := n.do(ctx, http.MethodGet, "/v1/node/"+id, nil, &nd)
-	return nd, err
-}
-
-// findNodeByName is the fallback when an agent has not reported a node ID yet.
-func (n *nomadClient) findNodeByName(ctx context.Context, name string) (string, error) {
-	var list []struct{ ID, Name string }
-	if err := n.do(ctx, http.MethodGet, "/v1/nodes", nil, &list); err != nil {
-		return "", err
-	}
-	for _, x := range list {
-		if strings.EqualFold(x.Name, name) {
-			return x.ID, nil
-		}
-	}
-	return "", fmt.Errorf("no Nomad node named %q", name)
-}
-
-// drain starts a drain. deadline 0 means no deadline, force drains immediately.
-func (n *nomadClient) drain(ctx context.Context, id string, deadline time.Duration, force bool) error {
-	d := int64(deadline)
-	if force {
-		d = -1
-	}
-	body := map[string]any{
-		"NodeID":    id,
-		"DrainSpec": map[string]any{"Deadline": d, "IgnoreSystemJobs": false},
-	}
-	return n.do(ctx, http.MethodPost, "/v1/node/"+id+"/drain", body, nil)
-}
-
-func (n *nomadClient) setEligibility(ctx context.Context, id string, eligible bool) error {
-	e := "ineligible"
-	if eligible {
-		e = "eligible"
-	}
-	return n.do(ctx, http.MethodPost, "/v1/node/"+id+"/eligibility", map[string]any{"NodeID": id, "Eligibility": e}, nil)
-}
-
-func (n *nomadClient) runningAllocs(ctx context.Context, id string) (int, error) {
-	var allocs []struct {
-		ClientStatus string `json:"ClientStatus"`
-	}
-	if err := n.do(ctx, http.MethodGet, "/v1/node/"+id+"/allocations", nil, &allocs); err != nil {
-		return 0, err
-	}
-	c := 0
-	for _, a := range allocs {
-		if a.ClientStatus == "running" || a.ClientStatus == "pending" {
-			c++
-		}
-	}
-	return c, nil
 }

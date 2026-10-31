@@ -207,7 +207,15 @@ dd[data-c=ips] { white-space: pre-line; }
 dd .adopt { margin-top: 6px; }
 dd .adopt button { width: auto; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; line-height: 1; }
 
-.cluster-sel { width: auto; max-width: 220px; height: 32px; }
 .okc { color: var(--ok); } .badc { color: var(--bad); }
 .crow { align-items: center; }
 dialog details.more { margin-top: 8px; }
+
+.cpick { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 8px 0 11px; border: 1px solid var(--bd); border-radius: 999px; background: var(--card); color: var(--fg2); font-size: 13px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.cpick:hover { border-color: var(--fg2); }
+.cpick:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(11,154,209,.15); }
+.cpick select { appearance: none; -webkit-appearance: none; width: auto; max-width: 200px; height: 30px; padding: 0 20px 0 0; border: 0; background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236b7380' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 4px center; color: var(--fg); font-weight: 600; font-size: 13px; cursor: pointer; }
+.cpick select:focus, .cpick select:focus-visible { outline: none; box-shadow: none; border: 0; }
+.cpick.single { cursor: default; border-color: transparent; background: transparent; padding-left: 0; }
+.cpick.single:hover { border-color: transparent; }
+.cpick.single select { background-image: none; padding-right: 0; pointer-events: none; }

@@ -30,9 +30,12 @@ const (
 	CmdTartPull   = "tart.pull"
 	CmdTartDelete = "tart.delete"
 	CmdTartPrune  = "tart.prune"
-	// Server-side only (Nomad API), never sent to an agent.
+	// Nomad API operations. The server picks an online agent in the host's
+	// cluster to run them (the target's own agent when it is up), because the
+	// server itself usually cannot reach Nomad.
 	CmdNomadDrain       = "nomad.drain"
 	CmdNomadEligibility = "nomad.eligibility"
+	CmdNomadPing        = "nomad.ping"
 )
 
 // Command states.
@@ -146,6 +149,18 @@ type NomadConfigParams struct {
 	WaitReadySec int `json:"wait_ready_sec,omitempty"`
 	// ValidateOnly checks the config without saving it.
 	ValidateOnly bool `json:"validate_only,omitempty"`
+}
+
+// NomadAPIParams is what the server sends for CmdNomadDrain, CmdNomadEligibility
+// and CmdNomadPing. It carries the cluster's ACL token, which is added when the
+// command is sent and never stored with the command.
+type NomadAPIParams struct {
+	Token           string `json:"token,omitempty"`
+	NodeID          string `json:"node_id,omitempty"`
+	NodeName        string `json:"node_name,omitempty"`
+	DeadlineMinutes int    `json:"deadline_minutes,omitempty"`
+	Force           bool   `json:"force,omitempty"`
+	Eligible        bool   `json:"eligible,omitempty"`
 }
 
 type NomadRestartParams struct {

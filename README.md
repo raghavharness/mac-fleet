@@ -12,7 +12,7 @@ Agents dial out to the server. No inbound ports or SSH are needed on the Macs.
 | Problem | Feature |
 |---|---|
 | No observability | CPU, memory, disk, load, VM count, Nomad state per host; live via SSE; charts 1h/24h/7d/30d (5-min rollups, 30-day retention); threshold alerts |
-| SSH for Nomad ops | Drain / eligibility via Nomad server API (ACL token held by server, editable in Settings); restart / stop / start through launchctl, an in-dashboard Nomad config viewer/editor (validate, diff, backup, rollback), and "Manage with launchd" to take over a Nomad that was started from a shell. Nomad's address, TLS and config path are discovered from the running process |
+| SSH for Nomad ops | Drain / eligibility run through a Mac agent against the cluster's Nomad API (ACL token held by the server and sent with the command only; falls back to any other online Mac in the same cluster when the target is down); restart / stop / start through launchctl, an in-dashboard Nomad config viewer/editor (validate, diff, backup, rollback), and "Manage with launchd" to take over a Nomad that was started from a shell. Nomad's address, TLS and config path are discovered from the running process |
 | Several Nomad environments | Add any number of Nomad clusters (address, ACL token, optional CA / client cert / key files); each host belongs to one, the header switcher scopes the dashboard, and limits apply per cluster |
 | Finding a host | Host IPs shown and searchable |
 | SSH for Tart ops | List / pull (public DockerHub) / delete images, per host or as a wave rollout across the fleet |
@@ -118,5 +118,5 @@ go run ./cmd/server
 - Transport is WebSocket, not gRPC (the design doc originally said gRPC).
 - No dashboard auth; single server replica.
 - Nomad config history is `.bak` on the host only (no versioned table yet).
-- Verified end to end against a fake Nomad/Tart; not yet against a real `tart list --format json` and real launchd labels. The Nomad server API must be reachable from the GKE cluster for drain/eligibility.
+- Verified end to end against a fake Nomad/Tart; not yet against a real `tart list --format json` and real launchd labels. Drain/eligibility/connection tests run on the Macs, so the GKE server does not need to reach the Nomad API (e.g. behind a VPN); at least one Mac in the cluster must be online.
 - Kubernetes manifests have not been applied to a cluster.

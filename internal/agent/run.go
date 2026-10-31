@@ -231,6 +231,18 @@ func (a *Agent) dispatch(ctx context.Context, cmd wire.Command, progress func(st
 		return plain("stopped", nomadStop(ctx, a.cfg, progress))
 	case wire.CmdNomadStart:
 		return plain("started", nomadStart(ctx, a.cfg, progress))
+	case wire.CmdNomadDrain, wire.CmdNomadEligibility, wire.CmdNomadPing:
+		var p wire.NomadAPIParams
+		if err := json.Unmarshal(cmd.Params, &p); err != nil {
+			return "", nil, err
+		}
+		switch cmd.Type {
+		case wire.CmdNomadDrain:
+			return plain(nomadDrain(ctx, a.cfg, p, progress))
+		case wire.CmdNomadEligibility:
+			return plain(nomadEligibility(ctx, a.cfg, p))
+		}
+		return plain(nomadPing(ctx, a.cfg, p))
 	case wire.CmdNomadAdopt:
 		return plain("nomad is now managed by launchd", nomadAdopt(ctx, a.cfg, progress))
 	case wire.CmdNomadConfigRead:

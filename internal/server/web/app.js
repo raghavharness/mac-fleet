@@ -30,7 +30,9 @@ function paintClusterSwitch() {
   const sig = S.cluster + "|" + S.clusters.map((c) => c.id + c.name).join(",");
   if (sel._sig === sig) return;
   sel._sig = sig;
-  sel.hidden = S.clusters.length === 0;
+  const box = $("#cpick");
+  box.hidden = S.clusters.length === 0;
+  box.classList.toggle("single", S.clusters.length === 1);
   sel.innerHTML = (S.clusters.length > 1 ? `<option value="all">All clusters</option>` : "") + S.clusters.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
   if (S.clusters.length === 1) S.cluster = S.clusters[0].id;
   sel.value = S.cluster;
@@ -1089,7 +1091,7 @@ const acts = {
     const r = await withBusy(el, () => api("POST", "/api/clusters/test", { ...p, id: form._cluster ? form._cluster.id : "" }));
     const out = $("#cl-test");
     out.className = "muted " + (r.ok ? "okc" : "badc");
-    out.textContent = r.ok ? "Connected" : r.error;
+    out.textContent = r.ok ? "Connected" + (r.via ? ` through ${r.via}, since the server can't reach it directly` : "") : r.error;
   },
   "bulk-clear": () => { [...S.sel].forEach((id) => S.view.select(id, false)); S.view.renderBulk(); },
   range: (el) => {

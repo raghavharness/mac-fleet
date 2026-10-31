@@ -183,7 +183,7 @@ func (s *Server) createCommand(ctx context.Context, hostID, typ string, params j
 	if agentCommand(typ) {
 		s.sendToAgent(hostID, wire.Command{ID: c.ID, Type: typ, Params: params})
 	} else {
-		go s.runServerCommand(context.Background(), c)
+		go s.runNomadOp(context.Background(), c)
 	}
 	return c, nil
 }
@@ -214,95 +214,6 @@ func (s *Server) addEvent(ctx context.Context, id, line string) {
 	}
 	s.st.pool.Exec(ctx, `INSERT INTO command_events(command_id, line) VALUES($1,$2)`, id, line)
 	s.bus.publish("command", id)
-}
-
-// runServerCommand executes commands that use the Nomad API instead of an agent.
-func (s *Server) runServerCommand(ctx context.Context, c *Command) {
-	s.setCommandState(ctx, c.ID, wire.StateRunning, "")
-	msg, err := s.execNomadCommand(ctx, c)
-	if err != nil {
-		s.addEvent(ctx, c.ID, "error: "+err.Error())
-		s.setCommandState(ctx, c.ID, wire.StateFailed, err.Error())
-		return
-	}
-	s.setCommandState(ctx, c.ID, wire.StateSucceeded, msg)
-}
-
-func (s *Server) nodeIDFor(ctx context.Context, nc *nomadClient, hostID string) (string, error) {
-	var sample []byte
-	var name string
-	if err := s.st.pool.QueryRow(ctx, `SELECT name, last_sample FROM hosts WHERE id=$1`, hostID).Scan(&name, &sample); err != nil {
-		return "", err
-	}
-	if sample != nil {
-		var sm wire.Sample
-		if json.Unmarshal(sample, &sm) == nil && sm.Nomad.NodeID != "" {
-			return sm.Nomad.NodeID, nil
-		}
-	}
-	return nc.findNodeByName(ctx, name)
-}
-
-func (s *Server) execNomadCommand(ctx context.Context, c *Command) (string, error) {
-	nc, err := s.nomadForHost(ctx, c.HostID)
-	if err != nil {
-		return "", err
-	}
-	id, err := s.nodeIDFor(ctx, nc, c.HostID)
-	if err != nil {
-		return "", err
-	}
-	switch c.Type {
-	case wire.CmdNomadEligibility:
-		var p struct {
-			Eligible bool `json:"eligible"`
-		}
-		_ = json.Unmarshal(c.Params, &p)
-		if err := nc.setEligibility(ctx, id, p.Eligible); err != nil {
-			return "", err
-		}
-		if p.Eligible {
-			return "node set eligible", nil
-		}
-		return "node set ineligible", nil
-	case wire.CmdNomadDrain:
-		var p struct {
-			DeadlineMinutes int  `json:"deadline_minutes"`
-			Force           bool `json:"force"`
-		}
-		_ = json.Unmarshal(c.Params, &p)
-		deadline := time.Duration(p.DeadlineMinutes) * time.Minute
-		if err := nc.drain(ctx, id, deadline, p.Force); err != nil {
-			return "", err
-		}
-		s.addEvent(ctx, c.ID, "drain started")
-		limit := deadline + 15*time.Minute
-		if deadline == 0 {
-			limit = 2 * time.Hour
-		}
-		return s.waitDrain(ctx, c.ID, nc, id, limit)
-	}
-	return "", errors.New("unsupported command")
-}
-
-func (s *Server) waitDrain(ctx context.Context, cmdID string, nc *nomadClient, nodeID string, limit time.Duration) (string, error) {
-	end := time.Now().Add(limit)
-	last := -1
-	for time.Now().Before(end) {
-		time.Sleep(5 * time.Second)
-		nd, err := nc.node(ctx, nodeID)
-		if err != nil {
-			continue
-		}
-		if n, err := nc.runningAllocs(ctx, nodeID); err == nil && n != last {
-			last = n
-			s.addEvent(ctx, cmdID, fmt.Sprintf("allocations remaining: %d", n))
-		}
-		if !nd.Drain {
-			return "drain complete", nil
-		}
-	}
-	return "", errors.New("drain did not finish in time")
 }
 
 // janitor expires commands nobody picked up.
