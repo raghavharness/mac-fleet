@@ -59,6 +59,13 @@ func (s *Server) startBatch(ctx context.Context, req batchReq, actor string) (*B
 	if err := validateParams(req.Type, req.Params); err != nil {
 		return nil, err
 	}
+	if req.Type == wire.CmdAgentUpgrade {
+		// Fix the build once so every wave installs the same one.
+		var err error
+		if req.Params, err = s.resolveUpgrade(ctx, req.Params); err != nil {
+			return nil, err
+		}
+	}
 	b := &Batch{
 		ID: randID(), Type: req.Type, Params: req.Params, HostIDs: req.HostIDs,
 		WaveSize: req.WaveSize, FailLimit: req.FailLimit, State: "running", RequestedBy: actor, CreatedAt: time.Now(),

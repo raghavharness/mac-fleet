@@ -16,6 +16,17 @@ const S = {
   sel: new Set(), view: null, cmdOpen: null, lastEvent: 0,
   clusters: [], cluster: (() => { try { return localStorage.getItem("cluster") || "all"; } catch (_) { return "all"; } })(),
 };
+const newer = (a, b) => { // is version a newer than b
+  const n = (v) => String(v || "").replace(/^v/, "").split(/[.-]/).slice(0, 3).map((x) => parseInt(x, 10) || 0);
+  const x = n(a), y = n(b);
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
+  return false;
+};
+const outdated = (h) => !!S.latest && !!h.agent_version && /^v\d/.test(h.agent_version) && newer(S.latest, h.agent_version);
+async function loadRelease() {
+  try { const r = await api("GET", "/api/agent-release"); S.latest = r.version || ""; S.latestErr = r.error || ""; } catch (_) { /* optional */ }
+  if (S.view && S.view.paintRelease) S.view.paintRelease();
+}
 const clusterName = (id) => { const c = S.clusters.find((x) => x.id === id); return c ? c.name : ""; };
 const inCluster = (h) => S.cluster === "all" || h.cluster_id === S.cluster;
 async function loadClusters() {
@@ -362,7 +373,7 @@ const FleetView = {
     if (!el) return;
     if (!S.sel.size) { if (el.firstChild) { el.firstChild.classList.add("leave"); setTimeout(() => (el.innerHTML = ""), 180); } return; }
     if (!el.firstChild || el.firstChild.classList.contains("leave")) {
-      el.innerHTML = `<div class="bulk enter"><span data-n></span><button data-act="bulk-drain">Drain</button><button data-act="bulk-restart">Restart Nomad</button><button data-act="bulk-pull">Pull image</button><button data-act="bulk-clear">Clear</button></div>`;
+      el.innerHTML = `<div class="bulk enter"><span data-n></span><button data-act="bulk-drain">Drain</button><button data-act="bulk-restart">Restart Nomad</button><button data-act="bulk-pull">Pull image</button><button data-act="bulk-upgrade">Upgrade agent</button><button data-act="bulk-clear">Clear</button></div>`;
     }
     setText($("[data-n]", el), `${S.sel.size} selected`);
   },
@@ -467,6 +478,7 @@ function patchRow(el, h) {
   for (const k in bars) { const b = $(`[data-c="${k}"]`, el), [w, bd, v] = bars[k]; s ? setBar(b, v, w, bd) : clearBar(b); }
   setText($(".vms", el), s ? `${s.vms_running} / 2` : "-");
   setText($(".ver", el), h.agent_version || "");
+  { const v = $(".ver", el); v.classList.toggle("old", outdated(h)); v.title = outdated(h) ? "Update available: " + S.latest : ""; }
   setHTML($(".seen", el), agoSpan(h.last_seen));
   if (!first && el._sig !== sig) flash(el);
   el._sig = sig;
@@ -679,7 +691,7 @@ const HostView = {
       <section class="card"><div class="hd"><h2>Command history</h2></div><div class="table" id="hcmds"></div></section>
     </div><aside class="side">
       <section class="card"><div class="hd"><h2>Host</h2></div><dl>
-        <dt>Pool</dt><dd data-c="pool">-</dd><dt>Agent version</dt><dd class="mono" data-c="ver">-</dd><dt>Nomad cluster</dt><dd data-c="cluster">-</dd><dt>IP addresses</dt><dd class="mono" data-c="ips">-</dd><dt>Nomad node</dt><dd class="mono" data-c="node">-</dd>
+        <dt>Pool</dt><dd data-c="pool">-</dd><dt>Agent version</dt><dd data-c="ver">-</dd><dt>Nomad cluster</dt><dd data-c="cluster">-</dd><dt>IP addresses</dt><dd class="mono" data-c="ips">-</dd><dt>Nomad node</dt><dd class="mono" data-c="node">-</dd>
         <dt>Nomad process</dt><dd data-c="managed">-</dd>
         <dt>Uptime</dt><dd data-c="uptime">-</dd><dt>Cores, memory</dt><dd data-c="hw">-</dd><dt>Free on volume</dt><dd data-c="free">-</dd><dt>Load (1m)</dt><dd data-c="load">-</dd><dt>Last seen</dt><dd data-c="seen">-</dd></dl>
         <div class="bd" style="padding-top:0"><button class="danger small" data-act="h-revoke">Revoke host</button></div></section>
@@ -741,6 +753,7 @@ const HostView = {
     el.querySelector(".empty")?.remove();
     syncList(el, this.cmds, (c) => c.id, cmdRowHTML(false), patchCmdRow);
   },
+  paintRelease() { if (this.host) this.paint(this.host); },
   paint(h) {
     const s = h.sample, on = h.status === "online";
     const c = (k) => $(`[data-c="${k}"]`, app);
@@ -752,7 +765,7 @@ const HostView = {
     c("elig").dataset.eligible = ineligible ? "1" : "0";
     app.querySelectorAll("[data-c=actions] button:not(.primary)").forEach((b) => (b.disabled = !on));
     setText(c("pool"), (h.labels || {}).pool || "-");
-    setText(c("ver"), h.agent_version || "-");
+    setHTML(c("ver"), `<span class="mono">${esc(h.agent_version || "-")}</span>${outdated(h) && on ? ` <div class="adopt"><button class="small" data-act="h-upgrade">Upgrade to ${esc(S.latest)}</button></div>` : ""}`);
     {
       const nm0 = s && s.nomad, det = nm0 ? [nm0.region, nm0.datacenter].filter(Boolean).join(" / ") : "";
       const name = h.cluster_id ? clusterName(h.cluster_id) : "";
@@ -1108,6 +1121,15 @@ const acts = {
       ${field("Type the host name to confirm", `<input id="confirm" name="confirm" type="text" autocomplete="off" placeholder="${esc(h.name)}">`, "confirm")}${overrideField}`,
       async (f) => { if (f.confirm !== h.name) throw new Error("Host name does not match"); await hostCmd(h.id, "nomad.drain", { deadline_minutes: +f.deadline_minutes, force: !!f.force }, !!f.override_limit); }, "Start drain", true);
   },
+  "h-upgrade": () => {
+    const h = state_host;
+    openDialog(`Upgrade agent on ${h.name}`, `<p class="muted">Installs ${esc(S.latest)} (now ${esc(h.agent_version)}). The agent verifies the download's checksum, restarts itself through launchd and reconnects in about a minute. If the new version cannot reach the server it puts the old one back. Nomad and running VMs are not touched.</p>`,
+      async () => { await hostCmd(h.id, "agent.upgrade", { version: S.latest }); }, "Upgrade");
+  },
+  "bulk-upgrade": () => {
+    const n = [...S.sel].filter((id) => outdated(S.hosts.get(id) || {})).length;
+    bulkDialog("Upgrade the agent on selected hosts", "agent.upgrade", `<p class="muted">Installs ${esc(S.latest || "the latest release")}${n < S.sel.size ? `. ${S.sel.size - n} selected host${S.sel.size - n === 1 ? " is" : "s are"} already current and will be skipped by the agent` : ""}.</p>`, () => ({ version: S.latest || "latest" }));
+  },
   "h-eligibility": (el) => {
     const h = state_host, toEligible = el.dataset.eligible === "1";
     openDialog(`${toEligible ? "Set eligible" : "Set ineligible"}: ${h.name}`, `<p class="muted">${toEligible ? "The node will receive new allocations again." : "The node keeps running allocations but receives no new ones."}</p>${toEligible ? "" : overrideField}`,
@@ -1317,3 +1339,5 @@ $("#cluster-sel").onchange = (e) => {
 };
 connectEvents();
 loadClusters().catch(() => {}).finally(route);
+loadRelease();
+setInterval(loadRelease, 10 * 60 * 1000);

@@ -32,7 +32,7 @@ var imageNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$`)
 func agentCommand(t string) bool {
 	switch t {
 	case wire.CmdNomadRestart, wire.CmdNomadStop, wire.CmdNomadStart, wire.CmdNomadConfigApply, wire.CmdNomadConfigRead, wire.CmdNomadAdopt,
-		wire.CmdTartList, wire.CmdTartPull, wire.CmdTartDelete, wire.CmdTartPrune:
+		wire.CmdTartList, wire.CmdTartPull, wire.CmdTartDelete, wire.CmdTartPrune, wire.CmdAgentUpgrade:
 		return true
 	}
 	return false
@@ -76,6 +76,11 @@ func validateParams(t string, params json.RawMessage) error {
 		var p wire.TartPruneParams
 		if json.Unmarshal(params, &p) != nil || p.OlderThanDays < 1 {
 			return errors.New("params.older_than_days must be at least 1")
+		}
+	case wire.CmdAgentUpgrade:
+		var p wire.AgentUpgradeParams
+		if json.Unmarshal(params, &p) != nil || (p.Version != "latest" && !versionRe.MatchString(p.Version)) {
+			return errors.New(`params.version must look like v1.2.3, or "latest"`)
 		}
 	case wire.CmdNomadConfigApply:
 		var p wire.NomadConfigParams
@@ -157,6 +162,12 @@ func (s *Server) createCommand(ctx context.Context, hostID, typ string, params j
 	}
 	if err := validateParams(typ, params); err != nil {
 		return nil, err
+	}
+	if typ == wire.CmdAgentUpgrade {
+		var err error
+		if params, err = s.resolveUpgrade(ctx, params); err != nil {
+			return nil, err
+		}
 	}
 	var name string
 	var revoked bool

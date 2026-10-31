@@ -222,3 +222,4 @@ dialog details.more { margin-top: 8px; }
 .cpick.single span { color: var(--fg2); }
 .top .cpick { margin-left: auto; margin-right: -8px; }
 .top .cpick:not([hidden]) ~ .live { padding-left: 16px; border-left: 1px solid var(--bd); min-width: 0; height: 20px; }
+.ver.old, .muted.ver.old { color: var(--warn) !important; }

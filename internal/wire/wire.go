@@ -26,11 +26,12 @@ const (
 	CmdNomadConfigApply = "nomad.config.apply"
 	CmdNomadConfigRead  = "nomad.config.read"
 	// CmdNomadAdopt puts a shell-started Nomad under a launchd job.
-	CmdNomadAdopt = "nomad.service.install"
-	CmdTartList   = "tart.list"
-	CmdTartPull   = "tart.pull"
-	CmdTartDelete = "tart.delete"
-	CmdTartPrune  = "tart.prune"
+	CmdNomadAdopt   = "nomad.service.install"
+	CmdTartList     = "tart.list"
+	CmdTartPull     = "tart.pull"
+	CmdTartDelete   = "tart.delete"
+	CmdTartPrune    = "tart.prune"
+	CmdAgentUpgrade = "agent.upgrade"
 	// Nomad API operations. The server picks an online agent in the host's
 	// cluster to run them (the target's own agent when it is up), because the
 	// server itself usually cannot reach Nomad.
@@ -188,4 +189,18 @@ func Marshal(typ, id string, payload any) ([]byte, error) {
 // token is kept in memory by the agent and never written to disk.
 type Settings struct {
 	NomadToken string `json:"nomad_token"`
+}
+
+// UpgradeAsset is one downloadable agent build.
+type UpgradeAsset struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+}
+
+// AgentUpgradeParams asks the agent to replace its own binary. The server
+// fills Assets (keyed GOOS-GOARCH, e.g. darwin-arm64) from the GitHub release;
+// the agent only accepts a build whose SHA-256 matches.
+type AgentUpgradeParams struct {
+	Version string                  `json:"version"`
+	Assets  map[string]UpgradeAsset `json:"assets,omitempty"`
 }

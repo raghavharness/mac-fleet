@@ -61,6 +61,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/images", s.apiImages)
 	mux.HandleFunc("GET /api/settings", s.apiGetSettings)
 	mux.HandleFunc("PUT /api/settings", s.apiPutSettings)
+	mux.HandleFunc("GET /api/agent-release", s.apiAgentRelease)
 	mux.HandleFunc("GET /api/clusters", s.apiClusters)
 	mux.HandleFunc("POST /api/clusters", s.apiCreateCluster)
 	mux.HandleFunc("POST /api/clusters/test", s.apiTestCluster)

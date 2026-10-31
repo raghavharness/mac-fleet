@@ -33,6 +33,7 @@ func New(cfg *Config, cfgPath, version string) *Agent {
 
 // Run connects and reconnects until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
+	a.startUpgradeWatch()
 	go a.certRenewLoop(ctx)
 	backoff := time.Second
 	for ctx.Err() == nil {
@@ -109,6 +110,7 @@ func (a *Agent) session(ctx context.Context) error {
 	if err := send(wire.TypeHello, "", hello(a.cfg, a.version)); err != nil {
 		return err
 	}
+	a.upgradeOK()
 
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -250,6 +252,12 @@ func (a *Agent) dispatch(ctx context.Context, cmd wire.Command, progress func(st
 			return plain(nomadEligibility(ctx, a.cfg, p))
 		}
 		return plain(nomadPing(ctx, a.cfg, p))
+	case wire.CmdAgentUpgrade:
+		var p wire.AgentUpgradeParams
+		if err := json.Unmarshal(cmd.Params, &p); err != nil {
+			return "", nil, err
+		}
+		return plain(a.upgrade(ctx, p, progress))
 	case wire.CmdNomadAdopt:
 		return plain("nomad is now managed by launchd", nomadAdopt(ctx, a.cfg, progress))
 	case wire.CmdNomadConfigRead:

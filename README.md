@@ -120,3 +120,7 @@ go run ./cmd/server
 - Nomad config history is `.bak` on the host only (no versioned table yet).
 - Verified end to end against a fake Nomad/Tart; not yet against a real `tart list --format json` and real launchd labels. Drain/eligibility/connection tests run on the Macs, so the GKE server does not need to reach the Nomad API (e.g. behind a VPN); at least one Mac in the cluster must be online.
 - Kubernetes manifests have not been applied to a cluster.
+
+## Upgrading agents from the dashboard
+
+Agents running v0.1.6 or later can upgrade themselves. The host page shows "Upgrade to vX" when a newer release exists, and the Fleet bulk bar has "Upgrade agent" (rolled out in waves). The server reads the GitHub release and its checksums; the agent verifies the checksum, restarts through launchd and rolls back if the new version cannot reconnect. Older agents need one manual `install.sh --upgrade` first. Requires a public release repository.
