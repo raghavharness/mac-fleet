@@ -165,6 +165,13 @@ func (a *Agent) session(ctx context.Context) error {
 		if json.Unmarshal(data, &env) != nil {
 			continue
 		}
+		if env.Type == wire.TypeSettings {
+			var st wire.Settings
+			if json.Unmarshal(env.Payload, &st) == nil {
+				setRuntimeToken(st.NomadToken)
+			}
+			continue
+		}
 		if env.Type == wire.TypeCommand {
 			var cmd wire.Command
 			if json.Unmarshal(env.Payload, &cmd) != nil {

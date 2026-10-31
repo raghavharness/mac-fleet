@@ -220,11 +220,19 @@ func (s *Server) handleAgentMessage(ctx context.Context, ac *agentConn, env wire
 		s.st.pool.Exec(ctx, `UPDATE commands SET state='failed', message='agent restarted', updated_at=now()
 			WHERE host_id=$1 AND state='running'`, hostID)
 		s.publishHost(hostID)
+		s.pushSettings(ctx, hostID)
 		s.flushQueued(ctx, hostID)
 	case wire.TypeMetrics:
 		var sm wire.Sample
 		if json.Unmarshal(env.Payload, &sm) != nil {
 			return
+		}
+		if tokenless(sm.Nomad) {
+			var hint string
+			s.st.pool.QueryRow(ctx, `SELECT elig_hint FROM hosts WHERE id=$1`, hostID).Scan(&hint)
+			if hint != "" {
+				sm.Nomad.Eligibility = hint
+			}
 		}
 		b, _ := json.Marshal(sm)
 		s.st.pool.Exec(ctx, `UPDATE hosts SET last_sample=$2, last_sample_at=now(), last_seen=now() WHERE id=$1`, hostID, b)
@@ -262,7 +270,46 @@ func (s *Server) handleAgentMessage(ctx context.Context, ac *agentConn, env wire
 			s.cacheNomadConfig(ctx, hostID, res)
 		}
 		s.setCommandState(ctx, res.CommandID, res.State, res.Message, res.Data)
+		if res.State == wire.StateSucceeded {
+			s.noteEligibility(ctx, res.CommandID)
+		}
 	}
+}
+
+// noteEligibility remembers the eligibility a successful command set. It fills
+// in for agents that cannot read the node (no ACL token), and updates the
+// stored sample at once instead of waiting for the next metrics tick.
+func (s *Server) noteEligibility(ctx context.Context, cmdID string) {
+	var typ, hostID string
+	var params []byte
+	if s.st.pool.QueryRow(ctx, `SELECT type, host_id, params FROM commands WHERE id=$1`, cmdID).Scan(&typ, &hostID, &params) != nil {
+		return
+	}
+	var hint string
+	switch typ {
+	case wire.CmdNomadDrain:
+		hint = "ineligible"
+	case wire.CmdNomadEligibility:
+		var p wire.NomadAPIParams
+		if json.Unmarshal(params, &p) != nil {
+			return
+		}
+		hint = "eligible"
+		if !p.Eligible {
+			hint = "ineligible"
+		}
+	default:
+		return
+	}
+	s.st.pool.Exec(ctx, `UPDATE hosts SET elig_hint=$2,
+		last_sample = CASE WHEN last_sample IS NULL THEN NULL ELSE jsonb_set(last_sample, '{nomad,eligibility}', to_jsonb($2::text)) END
+		WHERE id=$1`, hostID, hint)
+	s.publishHost(hostID)
+}
+
+// tokenless reports that the agent could not read the node's real state.
+func tokenless(n wire.NomadState) bool {
+	return strings.HasPrefix(n.Error, "node details need") || strings.HasPrefix(n.Error, "eligibility unknown")
 }
 
 // flushQueued sends commands that were waiting while the host was offline.

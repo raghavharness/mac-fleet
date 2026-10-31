@@ -105,3 +105,4 @@ CREATE TABLE IF NOT EXISTS clusters (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS cluster_id text NOT NULL DEFAULT '';
+ALTER TABLE hosts ADD COLUMN IF NOT EXISTS elig_hint text NOT NULL DEFAULT '';

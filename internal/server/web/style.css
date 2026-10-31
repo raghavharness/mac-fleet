@@ -218,4 +218,7 @@ dialog details.more { margin-top: 8px; }
 .cpick select:focus, .cpick select:focus-visible { outline: none; box-shadow: none; border: 0; }
 .cpick.single { cursor: default; border-color: transparent; background: transparent; padding-left: 0; }
 .cpick.single:hover { border-color: transparent; }
-.cpick.single select { background-image: none; padding-right: 0; pointer-events: none; }
+.cpick.single select { background-image: none; padding: 0; pointer-events: none; field-sizing: content; }
+.cpick.single span { color: var(--fg2); }
+.top .cpick { margin-left: auto; margin-right: -8px; }
+.top .cpick:not([hidden]) ~ .live { padding-left: 16px; border-left: 1px solid var(--bd); min-width: 0; height: 20px; }

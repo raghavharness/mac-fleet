@@ -12,6 +12,7 @@ const (
 	TypeInventory = "inventory"
 	TypeProgress  = "progress"
 	TypeResult    = "result"
+	TypeSettings  = "settings" // server -> agent: runtime settings, kept in memory only
 	// server -> agent
 	TypeCommand = "command"
 )
@@ -177,4 +178,10 @@ func Marshal(typ, id string, payload any) ([]byte, error) {
 		raw = b
 	}
 	return json.Marshal(Envelope{Type: typ, ID: id, Payload: raw})
+}
+
+// Settings is pushed by the server after hello and when a cluster changes. The
+// token is kept in memory by the agent and never written to disk.
+type Settings struct {
+	NomadToken string `json:"nomad_token"`
 }

@@ -139,3 +139,43 @@ func (s *Server) pingViaHost(ctx context.Context, hostID, hostName, token string
 	}
 	return "", errors.New("timed out waiting for " + hostName)
 }
+
+// pushSettings sends the host's cluster token to its agent, which keeps it in
+// memory to read node state.
+func (s *Server) pushSettings(ctx context.Context, hostID string) {
+	ac := s.hub.get(hostID)
+	if ac == nil {
+		return
+	}
+	var tok string
+	if cid, err := s.clusterOf(ctx, hostID); err == nil {
+		tok, _ = s.st.getSecret(ctx, secretKey(cid, "token"))
+	}
+	b, err := wire.Marshal(wire.TypeSettings, "", wire.Settings{NomadToken: tok})
+	if err != nil {
+		return
+	}
+	select {
+	case ac.send <- b:
+	default:
+	}
+}
+
+// pushClusterSettings refreshes every connected host of a cluster.
+func (s *Server) pushClusterSettings(ctx context.Context, clusterID string) {
+	rows, err := s.st.pool.Query(ctx, `SELECT id FROM hosts WHERE connected AND NOT revoked AND (cluster_id=$1 OR cluster_id='')`, clusterID)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		s.pushSettings(ctx, id)
+	}
+}

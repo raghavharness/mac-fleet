@@ -268,6 +268,7 @@ func (s *Server) apiCreateCluster(w http.ResponseWriter, r *http.Request) {
 	// The first cluster adopts hosts that have none.
 	s.migrateClusters(r.Context())
 	s.st.audit(r.Context(), actor(r), "cluster.create", req.Name, nil)
+	s.pushClusterSettings(r.Context(), id)
 	s.bus.publish("clusters", id)
 	writeJSON(w, 200, map[string]any{"id": id})
 }
@@ -297,6 +298,7 @@ func (s *Server) apiUpdateCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.st.audit(r.Context(), actor(r), "cluster.update", req.Name, map[string]any{"cleared": req.Clear})
+	s.pushClusterSettings(r.Context(), id)
 	s.bus.publish("clusters", id)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
@@ -387,6 +389,7 @@ func (s *Server) apiAssignCluster(w http.ResponseWriter, r *http.Request) {
 	s.st.audit(r.Context(), actor(r), "host.cluster", req.ClusterID, map[string]any{"hosts": len(req.HostIDs)})
 	for _, id := range req.HostIDs {
 		s.publishHost(id)
+		s.pushSettings(r.Context(), id)
 	}
 	s.bus.publish("clusters", "")
 	writeJSON(w, 200, map[string]any{"ok": true})

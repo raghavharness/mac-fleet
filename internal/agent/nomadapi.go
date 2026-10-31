@@ -9,10 +9,28 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/raghavharness/mac-fleet/internal/wire"
 )
+
+var (
+	tokMu        sync.RWMutex
+	runtimeToken string
+)
+
+func setRuntimeToken(t string) { tokMu.Lock(); runtimeToken = t; tokMu.Unlock() }
+
+// nomadToken is the token pushed by the server, else the optional local one.
+func nomadToken(c *Config) string {
+	tokMu.RLock()
+	defer tokMu.RUnlock()
+	if runtimeToken != "" {
+		return runtimeToken
+	}
+	return c.NomadToken
+}
 
 // nomadCall talks to Nomad through this machine's own client API, which
 // forwards to the servers. The token comes from the command, not from disk.
@@ -30,7 +48,7 @@ func nomadCall(ctx context.Context, c *Config, token, method, path string, body,
 		return err
 	}
 	if token == "" {
-		token = c.NomadToken
+		token = nomadToken(c)
 	}
 	if token != "" {
 		req.Header.Set("X-Nomad-Token", token)

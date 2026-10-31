@@ -112,8 +112,8 @@ func nomadState(ctx context.Context, c *Config) wire.NomadState {
 		// Without an ACL token the servers refuse the node lookup. The client's
 		// own heartbeat still shows whether it is registered and healthy.
 		if heartbeatOK(self.Stats["client"]) {
-			st.Status, st.Eligibility = "ready", "eligible"
-			st.Error = "node details need an ACL token (node:read): set nomad_token in the agent config"
+			st.Status = "ready"
+			st.Error = "eligibility unknown: the cluster needs an ACL token with node:read (set it in Settings > Nomad clusters)"
 			return st
 		}
 		st.Error = err.Error()
@@ -131,8 +131,8 @@ func nomadGet(ctx context.Context, c *Config, path string, out any) error {
 	if err != nil {
 		return err
 	}
-	if c.NomadToken != "" {
-		req.Header.Set("X-Nomad-Token", c.NomadToken)
+	if t := nomadToken(c); t != "" {
+		req.Header.Set("X-Nomad-Token", t)
 	}
 	resp, err := info.Client.Do(req)
 	if err != nil {
