@@ -13,6 +13,7 @@ Agents dial out to the server. No inbound ports or SSH are needed on the Macs.
 |---|---|
 | No observability | CPU, memory, disk, load, VM count, Nomad state per host; live via SSE; charts 1h/24h/7d/30d (5-min rollups, 30-day retention); threshold alerts |
 | SSH for Nomad ops | Drain / eligibility via Nomad server API (ACL token held by server, editable in Settings); restart / stop / start through launchctl, an in-dashboard Nomad config viewer/editor (validate, diff, backup, rollback), and "Manage with launchd" to take over a Nomad that was started from a shell. Nomad's address, TLS and config path are discovered from the running process |
+| Several Nomad environments | Add any number of Nomad clusters (address, ACL token, optional CA / client cert / key files); each host belongs to one, the header switcher scopes the dashboard, and limits apply per cluster |
 | Finding a host | Host IPs shown and searchable |
 | SSH for Tart ops | List / pull (public DockerHub) / delete images, per host or as a wave rollout across the fleet |
 

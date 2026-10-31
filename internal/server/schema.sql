@@ -95,3 +95,13 @@ ALTER TABLE hosts ADD COLUMN IF NOT EXISTS ips jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS remote_ip text NOT NULL DEFAULT '';
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS inventory_error text NOT NULL DEFAULT '';
 ALTER TABLE commands ADD COLUMN IF NOT EXISTS result jsonb;
+
+CREATE TABLE IF NOT EXISTS clusters (
+  id text PRIMARY KEY,
+  name text UNIQUE NOT NULL,
+  addr text NOT NULL,
+  tls_server_name text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE hosts ADD COLUMN IF NOT EXISTS cluster_id text NOT NULL DEFAULT '';

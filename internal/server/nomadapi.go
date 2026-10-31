@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,18 +17,6 @@ type nomadClient struct {
 	addr  string
 	token string
 	hc    *http.Client
-}
-
-func (s *Server) nomad(ctx context.Context) (*nomadClient, error) {
-	st := s.st.loadSettings(ctx)
-	if st.NomadAddr == "" {
-		return nil, errors.New("Nomad address is not configured (Settings)")
-	}
-	tok, err := s.st.getSecret(ctx, "nomad_token")
-	if err != nil {
-		return nil, err
-	}
-	return &nomadClient{addr: strings.TrimRight(st.NomadAddr, "/"), token: tok, hc: &http.Client{Timeout: 20 * time.Second}}, nil
 }
 
 func (n *nomadClient) do(ctx context.Context, method, path string, body, out any) error {

@@ -14,7 +14,28 @@ const S = {
   hosts: new Map(), loaded: false,
   range: "24h", q: "", status: "all", pool: "all", sort: { key: "name", dir: 1 },
   sel: new Set(), view: null, cmdOpen: null, lastEvent: 0,
+  clusters: [], cluster: (() => { try { return localStorage.getItem("cluster") || "all"; } catch (_) { return "all"; } })(),
 };
+const clusterName = (id) => { const c = S.clusters.find((x) => x.id === id); return c ? c.name : ""; };
+const inCluster = (h) => S.cluster === "all" || h.cluster_id === S.cluster;
+async function loadClusters() {
+  const r = await api("GET", "/api/clusters");
+  S.clusters = r.clusters || [];
+  if (S.cluster !== "all" && !S.clusters.some((c) => c.id === S.cluster)) S.cluster = "all";
+  paintClusterSwitch();
+}
+function paintClusterSwitch() {
+  const sel = $("#cluster-sel");
+  if (!sel) return;
+  const sig = S.cluster + "|" + S.clusters.map((c) => c.id + c.name).join(",");
+  if (sel._sig === sig) return;
+  sel._sig = sig;
+  sel.hidden = S.clusters.length === 0;
+  sel.innerHTML = (S.clusters.length > 1 ? `<option value="all">All clusters</option>` : "") + S.clusters.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  if (S.clusters.length === 1) S.cluster = S.clusters[0].id;
+  sel.value = S.cluster;
+}
+
 
 // ---------- helpers ----------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -218,12 +239,12 @@ async function loadHosts() {
   return hosts;
 }
 function updateTitle() {
-  const all = [...S.hosts.values()];
+  const all = hostsArr();
   const on = all.filter((h) => h.status === "online").length;
   const alerts = all.reduce((n, h) => n + (h.alerts || []).length, 0);
   document.title = `${alerts ? "(" + alerts + ") " : ""}Mac Fleet ${all.length ? "· " + on + "/" + all.length + " online" : ""}`;
 }
-const hostsArr = () => [...S.hosts.values()];
+const hostsArr = () => [...S.hosts.values()].filter(inCluster);
 
 // ---------- routing ----------
 function route() {
@@ -247,7 +268,7 @@ window.addEventListener("hashchange", route);
 // =====================================================================
 // Fleet
 // =====================================================================
-const COLS = "36px minmax(170px,1.4fr) minmax(120px,.9fr) 104px 112px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 64px 84px 88px";
+const COLS = "36px minmax(170px,1.4fr) minmax(110px,.8fr) 90px 104px minmax(84px,1fr) minmax(84px,1fr) minmax(84px,1fr) 56px 64px 80px";
 const SORTS = {
   name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }),
   cpu: (a, b) => (b.sample ? b.sample.cpu_pct : -1) - (a.sample ? a.sample.cpu_pct : -1),
@@ -339,7 +360,7 @@ const FleetView = {
     if (!el) return;
     if (!S.sel.size) { if (el.firstChild) { el.firstChild.classList.add("leave"); setTimeout(() => (el.innerHTML = ""), 180); } return; }
     if (!el.firstChild || el.firstChild.classList.contains("leave")) {
-      el.innerHTML = `<div class="bulk enter"><span data-n></span><button data-act="bulk-drain">Drain</button><button data-act="bulk-restart">Restart Nomad</button><button data-act="bulk-pull">Pull image</button><button data-act="bulk-clear">Clear</button></div>`;
+      el.innerHTML = `<div class="bulk enter"><span data-n></span><button data-act="bulk-drain">Drain</button><button data-act="bulk-restart">Restart Nomad</button><button data-act="bulk-pull">Pull image</button><button data-act="bulk-cluster">Set cluster</button><button data-act="bulk-clear">Clear</button></div>`;
     }
     setText($("[data-n]", el), `${S.sel.size} selected`);
   },
@@ -407,7 +428,7 @@ const FleetView = {
     const before = rows.children.length;
     syncList(rows, hosts, (h) => h.id, rowHTML, patchRow);
     [...rows.children].forEach((r) => { r.dataset.id = r.dataset.k; });
-    for (const id of [...S.sel]) if (!S.hosts.has(id)) S.sel.delete(id);
+    for (const id of [...S.sel]) if (!S.hosts.has(id) || !inCluster(S.hosts.get(id))) S.sel.delete(id);
     if (rows.children.length !== before || !this._ordered) { this.order(false); this._ordered = true; }
     this.applyFilter();
   },
@@ -435,7 +456,7 @@ function patchRow(el, h) {
   const first = !el._init;
   el._init = true;
   const nameEl = $(".name", el); setText(nameEl, h.name);
-  setText($(".pool", el), (h.labels || {}).pool || "");
+  setText($(".pool", el), [(h.labels || {}).pool, S.cluster === "all" && S.clusters.length > 1 ? clusterName(h.cluster_id) : ""].filter(Boolean).join("  ·  "));
   el.classList.toggle("offline", !on);
   setHTML($(".agent", el), `<span class="dot ${on ? "ok" : "bad"}"></span> ${on ? "Online" : "Offline"}`);
   setHTML($(".ips", el), ipCell(h));
@@ -656,7 +677,7 @@ const HostView = {
       <section class="card"><div class="hd"><h2>Command history</h2></div><div class="table" id="hcmds"></div></section>
     </div><aside class="side">
       <section class="card"><div class="hd"><h2>Host</h2></div><dl>
-        <dt>Pool</dt><dd data-c="pool">-</dd><dt>Agent version</dt><dd class="mono" data-c="ver">-</dd><dt>IP addresses</dt><dd class="mono" data-c="ips">-</dd><dt>Nomad node</dt><dd class="mono" data-c="node">-</dd>
+        <dt>Pool</dt><dd data-c="pool">-</dd><dt>Agent version</dt><dd class="mono" data-c="ver">-</dd><dt>Nomad cluster</dt><dd><select data-c="cluster" aria-label="Nomad cluster"></select></dd><dt>IP addresses</dt><dd class="mono" data-c="ips">-</dd><dt>Nomad node</dt><dd class="mono" data-c="node">-</dd>
         <dt>Nomad process</dt><dd data-c="managed">-</dd>
         <dt>Uptime</dt><dd data-c="uptime">-</dd><dt>Cores, memory</dt><dd data-c="hw">-</dd><dt>Free on volume</dt><dd data-c="free">-</dd><dt>Load (1m)</dt><dd data-c="load">-</dd><dt>Last seen</dt><dd data-c="seen">-</dd></dl>
         <div class="bd" style="padding-top:0"><button class="danger small" data-act="h-revoke">Revoke host</button></div></section>
@@ -672,6 +693,9 @@ const HostView = {
     this.cmds = [];
     this.cfg = { base: null, path: "", writable: true };
     $("#cfg-text").oninput = () => cfgStatus();
+    $("[data-c=cluster]").onchange = async (e) => {
+      try { await api("POST", "/api/assign-cluster", { host_ids: [id], cluster_id: e.target.value }); toast("Cluster updated"); } catch (err) { toast(err.message, true); }
+    };
     const h = S.hosts.get(id);
     if (h) { this.host = h; this.paint(h); }
     cfgLoadCached(id);
@@ -730,6 +754,12 @@ const HostView = {
     app.querySelectorAll("[data-c=actions] button:not(.primary)").forEach((b) => (b.disabled = !on));
     setText(c("pool"), (h.labels || {}).pool || "-");
     setText(c("ver"), h.agent_version || "-");
+    const cs = c("cluster");
+    if (document.activeElement !== cs) {
+      const sig = S.clusters.map((x) => x.id + x.name).join(",") + "|" + h.cluster_id;
+      if (cs._sig !== sig) { cs._sig = sig; cs.innerHTML = `<option value="">None</option>` + S.clusters.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join(""); }
+      cs.value = h.cluster_id || "";
+    }
     setText(c("ips"), allIPs(h).join("\n") || "-");
     setText(c("node"), s && s.nomad.node_id ? s.nomad.node_id.slice(0, 8) : "-");
     const nm = s && s.nomad;
@@ -779,7 +809,7 @@ const ImagesView = {
     await this.refresh();
   },
   async refresh() {
-    const [im, bt] = await Promise.all([api("GET", "/api/images"), api("GET", "/api/batches")]);
+    const [im, bt] = await Promise.all([api("GET", "/api/images" + (S.cluster !== "all" ? "?cluster=" + encodeURIComponent(S.cluster) : "")), api("GET", "/api/batches")]);
     if (S.view !== this) return;
     const images = im.images || [], total_hosts = im.total_hosts || 0, hosts = im.hosts || [], batches = bt.batches || [];
     this.data = { images, total_hosts, hosts };
@@ -840,12 +870,9 @@ const SettingsView = {
     this.known = new Set(S.hosts.keys());
     this.ins = ins;
     app.innerHTML = `<h1>Settings</h1>
-    <section class="card"><div class="hd"><h2 class="grow">Nomad connection</h2><span id="nomad-state" class="badge mute">${st.nomad_token_set ? "Token set" : "No token"}</span></div>
-      <form class="bd" id="f-nomad">
-        ${field("Nomad API address", `<input id="nomad_addr" type="text" value="${esc(st.nomad_addr)}" placeholder="https://nomad.example.com:4646">`, "nomad_addr")}
-        ${field("ACL token", `<input id="nomad_token" type="password" autocomplete="off" placeholder="${st.nomad_token_set ? "Paste a new token to replace the current one" : "Paste a token"}">`, "nomad_token")}
-        <div class="muted" style="margin-bottom:12px">The token is stored encrypted and is never shown again.${st.nomad_token_updated ? " Last replaced " + ago(st.nomad_token_updated) + "." : ""}</div>
-        <div class="row"><button type="button" data-act="nomad-test"><span class="lbl">Test connection</span></button><button class="primary" type="submit"><span class="lbl">Save</span></button></div></form></section>
+    <section class="card"><div class="hd"><h2 class="grow">Nomad clusters</h2><button class="small primary" data-act="cluster-add">Add cluster</button></div>
+      <div id="clusters"></div>
+      <div class="bd muted" style="padding-top:0">Hosts belong to one cluster. Drain and eligibility use that cluster's address, token and certificates, which are stored encrypted.</div></section>
     <section class="card"><div class="hd"><h2>Thresholds</h2></div>
       <form class="bd" id="f-thresholds"><div class="tiles">
         ${field("Disk used above (%)", num("disk_pct", st.disk_pct), "disk_pct")}${field("Memory used above (%)", num("mem_pct", st.mem_pct), "mem_pct")}
@@ -858,7 +885,7 @@ const SettingsView = {
         ${codeBlock("code-token", "export GITHUB_TOKEN=<your-read-only-token>")}</div></div>` : ""}
       <div class="step"><span class="n">${ins.private ? 2 : 1}</span><div class="grow"><b>Create a one-time enrollment token</b>
         <div class="muted">It works once and expires in 24 hours. The pool label is optional.</div>
-        <div class="row" style="margin-top:8px"><input id="enroll-pool" type="text" placeholder="Pool label (optional)" style="max-width:260px"><button class="primary" data-act="enroll"><span class="lbl">Create token and command</span></button></div></div></div>
+        <div class="row" style="margin-top:8px"><input id="enroll-pool" type="text" placeholder="Pool label (optional)" style="max-width:220px">${S.clusters.length ? `<select id="enroll-cluster" style="width:auto" aria-label="Nomad cluster"><option value="">Cluster: none</option>${S.clusters.map((c) => `<option value="${esc(c.id)}" ${c.id === S.cluster ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>` : ""}<button class="primary" data-act="enroll"><span class="lbl">Create token and command</span></button></div></div></div>
       <div class="step"><span class="n">${ins.private ? 3 : 2}</span><div class="grow"><b>Run the install command</b>
         <div class="muted">Downloads the agent, verifies its checksum, enrolls this Mac and starts it as a LaunchAgent.</div>
         <div id="enroll-out">${codeBlock("code-install", ins.install_command, true)}</div></div></div>
@@ -880,7 +907,7 @@ const SettingsView = {
     const saveAll = async () => {
       const cur = await api("GET", "/api/settings");
       return api("PUT", "/api/settings", {
-        nomad_addr: read("nomad_addr").trim(), nomad_token: read("nomad_token"),
+        nomad_addr: cur.nomad_addr,
         disk_pct: +read("disk_pct"), mem_pct: +read("mem_pct"), offline_min: +read("offline_min"), max_out_pct: +read("max_out_pct"),
         target_agent_version: cur.target_agent_version,
       });
@@ -891,10 +918,20 @@ const SettingsView = {
       b.classList.add("busy");
       try { await saveAll(); toast("Saved"); after && after(); } catch (err) { toast(err.message, true); } finally { b.classList.remove("busy"); }
     });
-    submit("#f-nomad", () => { const t = $("#nomad_token"); if (t.value) { setText($("#nomad-state"), "Token set"); t.value = ""; t.placeholder = "Paste a new token to replace the current one"; } });
     submit("#f-thresholds");
+    this.paintClusters();
   },
-  onEvent() {},
+  paintClusters() {
+    const el = $("#clusters");
+    if (!el) return;
+    if (!S.clusters.length) { el.innerHTML = `<div class="empty">No clusters yet. Add one to use drain and eligibility.</div>`; return; }
+    el.innerHTML = S.clusters.map((c) => `<div class="t crow" data-cid="${esc(c.id)}" style="grid-template-columns:1.2fr 2fr auto auto;min-width:640px">
+      <span><b>${esc(c.name)}</b><div class="muted tiny">${c.hosts} host${c.hosts === 1 ? "" : "s"}</div></span>
+      <span class="mono">${esc(c.addr)}</span>
+      <span class="row" style="gap:6px">${c.has_token ? `<span class="badge ok">token</span>` : `<span class="badge mute">no token</span>`}${c.has_ca ? `<span class="badge ok">CA</span>` : ""}${c.has_cert && c.has_key ? `<span class="badge ok">client cert</span>` : ""}</span>
+      <span class="row" style="gap:6px;justify-content:flex-end"><button class="small" data-act="cluster-edit" data-id="${esc(c.id)}">Edit</button><button class="small danger" data-act="cluster-del" data-id="${esc(c.id)}">Delete</button></span></div>`).join("");
+  },
+  onEvent(m) { if (m.kind === "clusters") loadClusters().then(() => this.paintClusters()).catch(() => {}); },
   onHost(h) {
     if (!this.known || this.known.has(h.id)) return;
     this.known.add(h.id);
@@ -912,6 +949,42 @@ function needLaunchd() {
   const n = state_host && state_host.sample && state_host.sample.nomad;
   if (n && n.managed_by === "shell") throw new Error("Nomad was started from a shell. Use Manage with launchd first.");
 }
+// ---------- Nomad cluster dialog ----------
+async function readFile(f) { return f && f.size ? (await f.text()).trim() : ""; }
+async function clusterPayload(form, c) {
+  const fd = new FormData(form);
+  const p = {
+    name: String(fd.get("name") || "").trim(), addr: String(fd.get("addr") || "").trim(), tls_server_name: String(fd.get("tls_server_name") || "").trim(),
+    token: String(fd.get("token") || ""), ca: await readFile(fd.get("ca")), cert: await readFile(fd.get("cert")), key: await readFile(fd.get("key")), clear: [],
+  };
+  for (const k of ["token", "ca", "cert", "key"]) if (fd.get("clear_" + k)) p.clear.push(k);
+  return p;
+}
+function clusterDialog(c) {
+  const has = (k) => c && c["has_" + k];
+  const row = (k, label, input) => `<div class="field"><label for="f_${k}">${label}</label>${input}${has(k) ? `<label class="check muted"><input type="checkbox" name="clear_${k}"> Remove the stored one (leave empty to keep it)</label>` : ""}</div>`;
+  const file = (k) => `<input id="f_${k}" name="${k}" type="file" accept=".pem,.crt,.cer,.key,.txt,application/x-pem-file">`;
+  openDialog(c ? `Edit cluster ${c.name}` : "Add Nomad cluster", `
+    ${field("Name", `<input id="f_name" name="name" type="text" required value="${esc(c ? c.name : "")}" placeholder="production">`, "f_name")}
+    ${field("Nomad API address", `<input id="f_addr" name="addr" type="text" required value="${esc(c ? c.addr : "")}" placeholder="https://nomad.example.com:4646">`, "f_addr")}
+    ${row("token", "ACL token (optional)", `<input id="f_token" name="token" type="password" autocomplete="off" placeholder="${has("token") ? "Stored. Paste a new token to replace it" : "Paste a token"}">`)}
+    <details class="more" ${c && (c.has_ca || c.has_cert || c.tls_server_name) ? "open" : ""}><summary>TLS certificates (optional)</summary>
+      ${row("ca", "CA certificate (ca.pem)", file("ca"))}
+      ${row("cert", "Client certificate (cert.pem)", file("cert"))}
+      ${row("key", "Client key (key.pem)", file("key"))}
+      ${field("TLS server name (optional)", `<input id="f_sn" name="tls_server_name" type="text" value="${esc(c ? c.tls_server_name : "")}" placeholder="server.global.nomad">`, "f_sn")}
+      <div class="muted tiny">Files are read in your browser and sent to this server, which stores them encrypted. The server name is needed when the certificate does not name the address you use.</div></details>
+    <div class="row" style="margin-top:12px"><button type="button" data-act="cluster-test"><span class="lbl">Test connection</span></button><span id="cl-test" class="muted grow"></span></div>`,
+    async (f, form) => {
+      const p = await clusterPayload(form, c);
+      if (c) await api("PUT", `/api/clusters/${c.id}`, p); else await api("POST", "/api/clusters", p);
+      await loadClusters();
+      S.view.paintClusters && S.view.paintClusters();
+      toast(c ? "Cluster saved" : "Cluster added");
+    }, c ? "Save" : "Add cluster");
+  dlg.querySelector("form")._cluster = c;
+}
+
 async function withBusy(el, fn) {
   el.disabled = true; el.classList.add("busy");
   try { return await fn(); } finally { el.disabled = false; el.classList.remove("busy"); }
@@ -998,6 +1071,26 @@ async function cfgSave(restart) {
 }
 
 const acts = {
+  "bulk-cluster": () => {
+    const n = S.sel.size, ids = [...S.sel];
+    openDialog("Set Nomad cluster", `<p class="muted">${n} host${n === 1 ? "" : "s"} selected.</p>${field("Cluster", `<select id="cluster_id" name="cluster_id"><option value="">None</option>${S.clusters.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select>`, "cluster_id")}`,
+      async (f) => { await api("POST", "/api/assign-cluster", { host_ids: ids, cluster_id: f.cluster_id }); ids.forEach((id) => S.view.select(id, false)); S.view.renderBulk(); toast("Cluster updated"); }, "Apply");
+  },
+  "cluster-add": () => clusterDialog(null),
+  "cluster-edit": (el) => clusterDialog(S.clusters.find((c) => c.id === el.dataset.id)),
+  "cluster-del": (el) => {
+    const c = S.clusters.find((x) => x.id === el.dataset.id);
+    openDialog(`Delete cluster ${c.name}`, `<p class="muted">Its ${c.hosts} host${c.hosts === 1 ? "" : "s"} stay in the fleet without a cluster, and the stored credentials are removed.</p>${field("Type the cluster name to confirm", `<input id="confirm" name="confirm" type="text" autocomplete="off" placeholder="${esc(c.name)}">`, "confirm")}`,
+      async (f) => { if (f.confirm !== c.name) throw new Error("Cluster name does not match"); await api("DELETE", `/api/clusters/${c.id}`); await loadClusters(); S.view.paintClusters && S.view.paintClusters(); toast("Cluster deleted"); }, "Delete", true);
+  },
+  "cluster-test": async (el) => {
+    const form = dlg.querySelector("form");
+    const p = await clusterPayload(form, form._cluster);
+    const r = await withBusy(el, () => api("POST", "/api/clusters/test", { ...p, id: form._cluster ? form._cluster.id : "" }));
+    const out = $("#cl-test");
+    out.className = "muted " + (r.ok ? "okc" : "badc");
+    out.textContent = r.ok ? "Connected" : r.error;
+  },
   "bulk-clear": () => { [...S.sel].forEach((id) => S.view.select(id, false)); S.view.renderBulk(); },
   range: (el) => {
     S.range = el.dataset.r;
@@ -1102,7 +1195,7 @@ const acts = {
     const pool = $("#enroll-pool").value.trim();
     el.classList.add("busy");
     try {
-      const r = await api("POST", "/api/enroll-tokens", { labels: pool ? { pool } : {} });
+      const r = await api("POST", "/api/enroll-tokens", { labels: pool ? { pool } : {}, cluster_id: ($("#enroll-cluster") || {}).value || "" });
       const out = $("#enroll-out");
       out.innerHTML = codeBlock("code-install", r.install_command) + `<div class="muted" style="margin-top:6px">Valid for 24 hours, works once.</div>`;
       out.classList.remove("enter"); void out.offsetWidth; out.classList.add("enter");
@@ -1198,6 +1291,7 @@ function connectEvents() {
       else resyncHosts();
     } else {
       if (m.kind === "command") refreshOpenCommand();
+      if (m.kind === "clusters") loadClusters().catch(() => {});
       S.view && S.view.onEvent && S.view.onEvent(m);
     }
   };
@@ -1219,5 +1313,11 @@ setInterval(() => {
 setInterval(() => { if (!document.hidden) resyncHosts(); }, 20000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) resync(); });
 
+$("#cluster-sel").onchange = (e) => {
+  S.cluster = e.target.value;
+  try { localStorage.setItem("cluster", S.cluster); } catch (_) { /* optional */ }
+  updateTitle();
+  route();
+};
 connectEvents();
-route();
+loadClusters().catch(() => {}).finally(route);

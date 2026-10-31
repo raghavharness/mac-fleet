@@ -36,6 +36,7 @@ func New(ctx context.Context, cfg *Config) (*Server, error) {
 	if err := st.ensurePartitions(ctx, 3); err != nil {
 		return nil, err
 	}
+	s.migrateClusters(ctx)
 	// Batches that were running when the process stopped cannot resume.
 	st.pool.Exec(ctx, `UPDATE batches SET state='halted', message='server restarted while running', updated_at=now() WHERE state='running'`)
 	return s, nil

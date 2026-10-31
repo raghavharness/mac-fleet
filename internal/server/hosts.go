@@ -35,12 +35,13 @@ type HostView struct {
 	InventoryErr string            `json:"inventory_error,omitempty"`
 	IPs          []string          `json:"ips"`
 	RemoteIP     string            `json:"remote_ip"`
+	ClusterID    string            `json:"cluster_id"`
 	Alerts       []Alert           `json:"alerts"`
 }
 
 func (s *Server) listHosts(ctx context.Context) ([]HostView, error) {
 	st := s.st.loadSettings(ctx)
-	rows, err := s.st.pool.Query(ctx, `SELECT id,name,labels,agent_version,os,cores,mem_gb,last_seen,connected,revoked,last_sample,last_sample_at,inventory,ips,remote_ip,inventory_error
+	rows, err := s.st.pool.Query(ctx, `SELECT id,name,labels,agent_version,os,cores,mem_gb,last_seen,connected,revoked,last_sample,last_sample_at,inventory,ips,remote_ip,inventory_error,cluster_id
 		FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -50,7 +51,7 @@ func (s *Server) listHosts(ctx context.Context) ([]HostView, error) {
 	for rows.Next() {
 		var h HostView
 		var labels, sample, inv, ips []byte
-		if err := rows.Scan(&h.ID, &h.Name, &labels, &h.AgentVersion, &h.OS, &h.Cores, &h.MemGB, &h.LastSeen, &h.Connected, &h.Revoked, &sample, &h.SampleAt, &inv, &ips, &h.RemoteIP, &h.InventoryErr); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &labels, &h.AgentVersion, &h.OS, &h.Cores, &h.MemGB, &h.LastSeen, &h.Connected, &h.Revoked, &sample, &h.SampleAt, &inv, &ips, &h.RemoteIP, &h.InventoryErr, &h.ClusterID); err != nil {
 			return nil, err
 		}
 		json.Unmarshal(labels, &h.Labels)

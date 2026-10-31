@@ -61,7 +61,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/images", s.apiImages)
 	mux.HandleFunc("GET /api/settings", s.apiGetSettings)
 	mux.HandleFunc("PUT /api/settings", s.apiPutSettings)
-	mux.HandleFunc("POST /api/settings/nomad/test", s.apiNomadTest)
+	mux.HandleFunc("GET /api/clusters", s.apiClusters)
+	mux.HandleFunc("POST /api/clusters", s.apiCreateCluster)
+	mux.HandleFunc("POST /api/clusters/test", s.apiTestCluster)
+	mux.HandleFunc("PUT /api/clusters/{id}", s.apiUpdateCluster)
+	mux.HandleFunc("DELETE /api/clusters/{id}", s.apiDeleteCluster)
+	mux.HandleFunc("POST /api/assign-cluster", s.apiAssignCluster)
 	mux.HandleFunc("POST /api/enroll-tokens", s.apiEnrollToken)
 	mux.HandleFunc("GET /api/audit", s.apiAudit)
 	mux.HandleFunc("GET /api/agent-install", s.apiAgentInstall)
@@ -261,8 +266,9 @@ func (s *Server) apiImages(w http.ResponseWriter, r *http.Request) {
 	agg := map[string]*imageAgg{}
 	total := 0
 	hostList := []map[string]any{}
+	cluster := r.URL.Query().Get("cluster")
 	for _, h := range hosts {
-		if h.Revoked {
+		if h.Revoked || (cluster != "" && h.ClusterID != cluster) {
 			continue
 		}
 		total++
@@ -330,25 +336,18 @@ func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.st.loadSettings(r.Context()))
 }
 
-func (s *Server) apiNomadTest(w http.ResponseWriter, r *http.Request) {
-	nc, err := s.nomad(r.Context())
-	if err == nil {
-		err = nc.ping(r.Context())
-	}
-	if err != nil {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"ok": true})
-}
-
 func (s *Server) apiEnrollToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Labels map[string]string `json:"labels"`
+		Labels    map[string]string `json:"labels"`
+		ClusterID string            `json:"cluster_id"`
 	}
 	_ = decode(r, &req)
 	if req.Labels == nil {
 		req.Labels = map[string]string{}
+	}
+	delete(req.Labels, "cluster")
+	if req.ClusterID != "" {
+		req.Labels["cluster"] = req.ClusterID
 	}
 	raw := make([]byte, 24)
 	rand.Read(raw)

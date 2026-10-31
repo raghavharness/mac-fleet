@@ -58,9 +58,25 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := randID()
+	// A token can carry the cluster the host joins; it is not a label.
+	var lm map[string]string
+	json.Unmarshal(labels, &lm)
+	cluster := lm["cluster"]
+	delete(lm, "cluster")
+	labels, _ = json.Marshal(lm)
+	if cluster != "" {
+		var x string
+		if s.st.pool.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1`, cluster).Scan(&x) != nil {
+			cluster = ""
+		}
+	}
+	if cluster == "" {
+		cluster = s.onlyCluster(ctx)
+	}
 	// Re-enrolling an existing name keeps its identity and history.
-	err = s.st.pool.QueryRow(ctx, `INSERT INTO hosts(id,name,labels) VALUES($1,$2,$3)
-		ON CONFLICT (name) DO UPDATE SET revoked=false, labels=EXCLUDED.labels RETURNING id`, id, req.Hostname, labels).Scan(&id)
+	err = s.st.pool.QueryRow(ctx, `INSERT INTO hosts(id,name,labels,cluster_id) VALUES($1,$2,$3,$4)
+		ON CONFLICT (name) DO UPDATE SET revoked=false, labels=EXCLUDED.labels,
+		cluster_id=CASE WHEN EXCLUDED.cluster_id<>'' THEN EXCLUDED.cluster_id ELSE hosts.cluster_id END RETURNING id`, id, req.Hostname, labels, cluster).Scan(&id)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

@@ -206,3 +206,8 @@ dd[data-c=ips] { white-space: pre-line; }
 
 dd .adopt { margin-top: 6px; }
 dd .adopt button { width: auto; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; line-height: 1; }
+
+.cluster-sel { width: auto; max-width: 220px; height: 32px; }
+.okc { color: var(--ok); } .badc { color: var(--bad); }
+.crow { align-items: center; }
+dialog details.more { margin-top: 8px; }

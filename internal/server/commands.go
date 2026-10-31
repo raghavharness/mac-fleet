@@ -86,34 +86,56 @@ func validateParams(t string, params json.RawMessage) error {
 	return nil
 }
 
-// checkBlast refuses an action that would take more than max_out_pct of the
-// fleet out of service at once, unless the caller overrides it.
+// checkBlast refuses an action that would take more than max_out_pct of a
+// cluster's hosts out of service at once, unless the caller overrides it.
+// Each cluster is judged on its own.
 func (s *Server) checkBlast(ctx context.Context, targets []string) error {
 	st := s.st.loadSettings(ctx)
 	hosts, err := s.listHosts(ctx)
 	if err != nil {
 		return err
 	}
-	total, out := 0, 0
+	type tally struct{ total, out, add int }
+	byCluster := map[string]*tally{}
+	clusterOf := map[string]string{}
 	isOut := map[string]bool{}
 	for _, h := range hosts {
 		if h.Revoked {
 			continue
 		}
-		total++
+		t := byCluster[h.ClusterID]
+		if t == nil {
+			t = &tally{}
+			byCluster[h.ClusterID] = t
+		}
+		clusterOf[h.ID] = h.ClusterID
+		t.total++
 		if h.Status != "online" || h.Sample == nil || h.Sample.Nomad.Draining || h.Sample.Nomad.Eligibility == "ineligible" || h.Sample.Nomad.Status == "down" {
-			out++
+			t.out++
 			isOut[h.ID] = true
 		}
 	}
-	add := 0
 	for _, id := range targets {
 		if !isOut[id] {
-			add++
+			if t := byCluster[clusterOf[id]]; t != nil {
+				t.add++
+			}
 		}
 	}
-	if total > 0 && (out+add)*100 > total*st.MaxOutPct {
-		return fmt.Errorf("this would leave %d of %d hosts out of service (limit %d%%); pass override_limit to proceed", out+add, total, st.MaxOutPct)
+	for cid, t := range byCluster {
+		if t.add > 0 && t.total > 0 && (t.out+t.add)*100 > t.total*st.MaxOutPct {
+			where := "the fleet"
+			if cid != "" {
+				if cl, _ := s.listClusters(ctx); cl != nil {
+					for _, c := range cl {
+						if c.ID == cid {
+							where = "cluster " + c.Name
+						}
+					}
+				}
+			}
+			return fmt.Errorf("this would leave %d of %d hosts out of service in %s (limit %d%%); pass override_limit to proceed", t.out+t.add, t.total, where, st.MaxOutPct)
+		}
 	}
 	return nil
 }
@@ -222,7 +244,7 @@ func (s *Server) nodeIDFor(ctx context.Context, nc *nomadClient, hostID string) 
 }
 
 func (s *Server) execNomadCommand(ctx context.Context, c *Command) (string, error) {
-	nc, err := s.nomad(ctx)
+	nc, err := s.nomadForHost(ctx, c.HostID)
 	if err != nil {
 		return "", err
 	}
