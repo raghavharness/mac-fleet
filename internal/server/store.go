@@ -188,7 +188,7 @@ func (s *Store) rollup(ctx context.Context) error {
 	}
 	_, err := s.pool.Exec(ctx, `INSERT INTO metrics_5m(host_id, ts, cpu, cpu_max, mem, mem_max, disk, vms)
 		SELECT host_id, date_bin('5 minutes', ts, TIMESTAMPTZ '2000-01-01'),
-		       avg(cpu), max(cpu), avg(mem), max(mem), avg(disk), avg(vms)
+		       avg(cpu), max(cpu), avg(mem), max(mem), avg(disk), max(vms)
 		FROM metrics_raw WHERE ts >= $1 AND ts < $2 GROUP BY 1,2`, start, end)
 	if err != nil {
 		return err
@@ -220,7 +220,7 @@ func (s *Store) metricsFor(ctx context.Context, hostID, rng string) ([]Point, er
 		since, table, bucket = 24*time.Hour, "metrics_raw", "5 minutes"
 	}
 	q := fmt.Sprintf(`SELECT date_bin('%s', ts, TIMESTAMPTZ '2000-01-01') AS t,
-		avg(cpu), avg(mem), avg(disk), avg(vms) FROM %s
+		avg(cpu), avg(mem), avg(disk), max(vms) FROM %s
 		WHERE host_id=$1 AND ts >= $2 GROUP BY 1 ORDER BY 1`, bucket, table)
 	rows, err := s.pool.Query(ctx, q, hostID, time.Now().Add(-since))
 	if err != nil {

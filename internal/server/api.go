@@ -66,7 +66,6 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/clusters/test", s.apiTestCluster)
 	mux.HandleFunc("PUT /api/clusters/{id}", s.apiUpdateCluster)
 	mux.HandleFunc("DELETE /api/clusters/{id}", s.apiDeleteCluster)
-	mux.HandleFunc("POST /api/assign-cluster", s.apiAssignCluster)
 	mux.HandleFunc("POST /api/enroll-tokens", s.apiEnrollToken)
 	mux.HandleFunc("GET /api/audit", s.apiAudit)
 	mux.HandleFunc("GET /api/agent-install", s.apiAgentInstall)
@@ -338,17 +337,13 @@ func (s *Server) apiPutSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiEnrollToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Labels    map[string]string `json:"labels"`
-		ClusterID string            `json:"cluster_id"`
+		Labels map[string]string `json:"labels"`
 	}
 	_ = decode(r, &req)
 	if req.Labels == nil {
 		req.Labels = map[string]string{}
 	}
 	delete(req.Labels, "cluster")
-	if req.ClusterID != "" {
-		req.Labels["cluster"] = req.ClusterID
-	}
 	raw := make([]byte, 24)
 	rand.Read(raw)
 	token := base64.RawURLEncoding.EncodeToString(raw)

@@ -106,3 +106,17 @@ func TestHeartbeatOK(t *testing.T) {
 		t.Fatal("stale or serverless should not be ok")
 	}
 }
+
+func TestParseNomadHCLJoin(t *testing.T) {
+	h := parseNomadHCL(`
+region = "qa-region"
+datacenter = "dc1"
+client {
+  enabled = true
+  servers = ["10.1.0.5:4647", "10.1.0.6:4647"] # comment
+}
+`)
+	if h.Region != "qa-region" || h.Datacenter != "dc1" || len(h.Servers) != 2 || h.Servers[0] != "10.1.0.5:4647" {
+		t.Fatalf("got %+v", h)
+	}
+}

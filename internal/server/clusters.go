@@ -7,10 +7,13 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/raghavharness/mac-fleet/internal/wire"
 )
 
 // A Nomad cluster the fleet's hosts belong to. Credentials are stored
@@ -20,6 +23,7 @@ type Cluster struct {
 	Name          string `json:"name"`
 	Addr          string `json:"addr"`
 	TLSServerName string `json:"tls_server_name"`
+	Match         string `json:"match"`
 	Hosts         int    `json:"hosts"`
 	HasToken      bool   `json:"has_token"`
 	HasCA         bool   `json:"has_ca"`
@@ -34,7 +38,7 @@ func secretKey(id, part string) string { return "cluster:" + id + ":" + part }
 var secretParts = []string{"token", "ca", "cert", "key"}
 
 func (s *Server) listClusters(ctx context.Context) ([]Cluster, error) {
-	rows, err := s.st.pool.Query(ctx, `SELECT c.id, c.name, c.addr, c.tls_server_name,
+	rows, err := s.st.pool.Query(ctx, `SELECT c.id, c.name, c.addr, c.tls_server_name, c.match,
 		(SELECT count(*) FROM hosts h WHERE h.cluster_id=c.id AND NOT h.revoked) FROM clusters c ORDER BY c.name`)
 	if err != nil {
 		return nil, err
@@ -43,7 +47,7 @@ func (s *Server) listClusters(ctx context.Context) ([]Cluster, error) {
 	out := []Cluster{}
 	for rows.Next() {
 		var c Cluster
-		if err := rows.Scan(&c.ID, &c.Name, &c.Addr, &c.TLSServerName, &c.Hosts); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Addr, &c.TLSServerName, &c.Match, &c.Hosts); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -177,6 +181,7 @@ type clusterReq struct {
 	Name          string   `json:"name"`
 	Addr          string   `json:"addr"`
 	TLSServerName string   `json:"tls_server_name"`
+	Match         string   `json:"match"`
 	Token         string   `json:"token"`
 	CA            string   `json:"ca"`
 	Cert          string   `json:"cert"`
@@ -257,7 +262,7 @@ func (s *Server) apiCreateCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := randID()
-	if _, err := s.st.pool.Exec(r.Context(), `INSERT INTO clusters(id,name,addr,tls_server_name) VALUES($1,$2,$3,$4)`, id, req.Name, req.Addr, req.TLSServerName); err != nil {
+	if _, err := s.st.pool.Exec(r.Context(), `INSERT INTO clusters(id,name,addr,tls_server_name,match) VALUES($1,$2,$3,$4,$5)`, id, req.Name, req.Addr, req.TLSServerName, strings.TrimSpace(req.Match)); err != nil {
 		httpErr(w, 400, errors.New("a cluster with that name already exists"))
 		return
 	}
@@ -284,7 +289,7 @@ func (s *Server) apiUpdateCluster(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, err)
 		return
 	}
-	ct, err := s.st.pool.Exec(r.Context(), `UPDATE clusters SET name=$2, addr=$3, tls_server_name=$4, updated_at=now() WHERE id=$1`, id, req.Name, req.Addr, req.TLSServerName)
+	ct, err := s.st.pool.Exec(r.Context(), `UPDATE clusters SET name=$2, addr=$3, tls_server_name=$4, match=$5, updated_at=now() WHERE id=$1`, id, req.Name, req.Addr, req.TLSServerName, strings.TrimSpace(req.Match))
 	if err != nil {
 		httpErr(w, 400, errors.New("a cluster with that name already exists"))
 		return
@@ -366,31 +371,75 @@ func (s *Server) apiTestCluster(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error() + " (and no online Mac could test it either)"})
 }
 
-func (s *Server) apiAssignCluster(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		HostIDs   []string `json:"host_ids"`
-		ClusterID string   `json:"cluster_id"`
+// hostPart strips a scheme and port: "https://a.b:4646" -> "a.b".
+func hostPart(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+3:]
 	}
-	if err := decode(r, &req); err != nil || len(req.HostIDs) == 0 {
-		httpErr(w, 400, errors.New("host_ids is required"))
-		return
+	if i := strings.IndexAny(v, "/"); i >= 0 {
+		v = v[:i]
 	}
-	if req.ClusterID != "" {
-		var x string
-		if err := s.st.pool.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1`, req.ClusterID).Scan(&x); err != nil {
-			httpErr(w, 400, errors.New("cluster not found"))
-			return
+	if h, _, err := net.SplitHostPort(v); err == nil {
+		v = h
+	}
+	return strings.Trim(v, "[]")
+}
+
+// clusterMatches reports whether what a Nomad client joined (its servers,
+// region, datacenter) belongs to the cluster: the cluster's API host or one of
+// its match entries equals one of them.
+func clusterMatches(c Cluster, n wire.NomadState) bool {
+	have := map[string]bool{}
+	for _, sv := range n.Servers {
+		have[hostPart(sv)] = true
+	}
+	if n.Region != "" {
+		have[strings.ToLower(n.Region)] = true
+	}
+	if n.Datacenter != "" {
+		have[strings.ToLower(n.Datacenter)] = true
+	}
+	want := []string{hostPart(c.Addr)}
+	for _, m := range strings.FieldsFunc(c.Match, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }) {
+		want = append(want, hostPart(m))
+	}
+	for _, w := range want {
+		if w != "" && have[w] {
+			return true
 		}
 	}
-	if _, err := s.st.pool.Exec(r.Context(), `UPDATE hosts SET cluster_id=$2 WHERE id = ANY($1)`, req.HostIDs, req.ClusterID); err != nil {
-		httpErr(w, 500, err)
+	return false
+}
+
+// autoCluster places a host in the cluster its Nomad client joins. It is not
+// user-editable: the Mac's own Nomad is the source of truth.
+func (s *Server) autoCluster(ctx context.Context, hostID string, n wire.NomadState) {
+	cl, err := s.listClusters(ctx)
+	if err != nil || len(cl) == 0 {
 		return
 	}
-	s.st.audit(r.Context(), actor(r), "host.cluster", req.ClusterID, map[string]any{"hosts": len(req.HostIDs)})
-	for _, id := range req.HostIDs {
-		s.publishHost(id)
-		s.pushSettings(r.Context(), id)
+	target := ""
+	if len(cl) == 1 {
+		target = cl[0].ID
+	} else if len(n.Servers) > 0 || n.Region != "" || n.Datacenter != "" {
+		for _, c := range cl {
+			if clusterMatches(c, n) {
+				if target != "" {
+					target = "" // ambiguous
+					break
+				}
+				target = c.ID
+			}
+		}
+	} else {
+		return // nothing detected yet; keep what we have
 	}
+	var cur string
+	if s.st.pool.QueryRow(ctx, `SELECT cluster_id FROM hosts WHERE id=$1`, hostID).Scan(&cur) != nil || cur == target {
+		return
+	}
+	s.st.pool.Exec(ctx, `UPDATE hosts SET cluster_id=$2 WHERE id=$1`, hostID, target)
+	s.pushSettings(ctx, hostID)
 	s.bus.publish("clusters", "")
-	writeJSON(w, 200, map[string]any{"ok": true})
 }

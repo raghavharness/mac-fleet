@@ -234,6 +234,7 @@ func (s *Server) handleAgentMessage(ctx context.Context, ac *agentConn, env wire
 				sm.Nomad.Eligibility = hint
 			}
 		}
+		s.autoCluster(ctx, hostID, sm.Nomad)
 		b, _ := json.Marshal(sm)
 		s.st.pool.Exec(ctx, `UPDATE hosts SET last_sample=$2, last_sample_at=now(), last_seen=now() WHERE id=$1`, hostID, b)
 		if _, err := s.st.pool.Exec(ctx, `INSERT INTO metrics_raw(host_id,ts,cpu,mem,disk,disk_free,load1,vms)

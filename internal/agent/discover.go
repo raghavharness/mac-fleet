@@ -221,12 +221,29 @@ func hclValue(body, key string) string {
 	return strings.Trim(m[1], `"`)
 }
 
+// hclList reads `key = ["a", "b"]`.
+func hclList(body, key string) []string {
+	re := regexp.MustCompile(`(?s)\b` + regexp.QuoteMeta(key) + `\s*=\s*\[(.*?)\]`)
+	m := re.FindStringSubmatch(body)
+	if m == nil {
+		return nil
+	}
+	var out []string
+	for _, q := range regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(m[1], -1) {
+		out = append(out, q[1])
+	}
+	return out
+}
+
 type nomadHCL struct {
-	TLSHTTP  bool
-	CAFile   string
-	CertFile string
-	KeyFile  string
-	Addr     string // host:port the HTTP API listens on, for local use
+	TLSHTTP    bool
+	CAFile     string
+	CertFile   string
+	KeyFile    string
+	Addr       string // host:port the HTTP API listens on, for local use
+	Region     string
+	Datacenter string
+	Servers    []string // client.servers and server_join.retry_join
 }
 
 func parseNomadHCL(content string) nomadHCL {
@@ -254,6 +271,14 @@ func parseNomadHCL(content string) nomadHCL {
 		host = "127.0.0.1"
 	}
 	h.Addr = net.JoinHostPort(host, port)
+	h.Region = hclValue(src, "region")
+	h.Datacenter = hclValue(src, "datacenter")
+	if body, ok := hclBlock(src, "client"); ok {
+		h.Servers = append(h.Servers, hclList(body, "servers")...)
+	}
+	if body, ok := hclBlock(src, "server_join"); ok {
+		h.Servers = append(h.Servers, hclList(body, "retry_join")...)
+	}
 	return h
 }
 
@@ -263,6 +288,7 @@ type nomadInfo struct {
 	Proc       *nomadProc
 	ConfigPath string
 	Addr       string
+	HCL        nomadHCL
 	Client     *http.Client
 	At         time.Time
 	Key        string
@@ -330,6 +356,7 @@ func discoverNomad(ctx context.Context, c *Config) *nomadInfo {
 	if hostport == "" {
 		hostport = "127.0.0.1:4646"
 	}
+	info.HCL = hcl
 	info.Addr = scheme + "://" + hostport
 	if c.NomadAddr != "" {
 		info.Addr = strings.TrimRight(c.NomadAddr, "/")

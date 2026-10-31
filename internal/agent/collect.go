@@ -71,7 +71,8 @@ func round1(f float64) float64 { return float64(int(f*10+0.5)) / 10 }
 // agent config does not say.
 func nomadState(ctx context.Context, c *Config) wire.NomadState {
 	info := discoverNomad(ctx, c)
-	st := wire.NomadState{Addr: info.Addr, ConfigPath: info.ConfigPath, ManagedBy: "none"}
+	st := wire.NomadState{Addr: info.Addr, ConfigPath: info.ConfigPath, ManagedBy: "none",
+		Region: info.HCL.Region, Datacenter: info.HCL.Datacenter, Servers: info.HCL.Servers}
 	if info.Proc != nil {
 		st.Pid = info.Proc.Pid
 		st.ManagedBy = "shell"
@@ -80,7 +81,14 @@ func nomadState(ctx context.Context, c *Config) wire.NomadState {
 		st.ManagedBy = "launchd"
 	}
 	var self struct {
-		Stats map[string]map[string]string `json:"stats"`
+		Stats  map[string]map[string]string `json:"stats"`
+		Config struct {
+			Region     string `json:"Region"`
+			Datacenter string `json:"Datacenter"`
+			Client     struct {
+				Servers []string `json:"Servers"`
+			} `json:"Client"`
+		} `json:"config"`
 	}
 	if err := nomadGet(ctx, c, "/v1/agent/self", &self); err != nil {
 		// The node details need agent:read; the health endpoint may still answer.
@@ -97,6 +105,16 @@ func nomadState(ctx context.Context, c *Config) wire.NomadState {
 		return st
 	}
 	st.Reachable = true
+	// The running agent's own view wins over the file.
+	if self.Config.Region != "" {
+		st.Region = self.Config.Region
+	}
+	if self.Config.Datacenter != "" {
+		st.Datacenter = self.Config.Datacenter
+	}
+	if len(self.Config.Client.Servers) > 0 {
+		st.Servers = self.Config.Client.Servers
+	}
 	id := self.Stats["client"]["node_id"]
 	if id == "" {
 		st.Error = "agent is not running as a client"

@@ -77,6 +77,10 @@ type NomadState struct {
 	Status      string `json:"status,omitempty"`      // ready, down, initializing
 	Eligibility string `json:"eligibility,omitempty"` // eligible, ineligible
 	Draining    bool   `json:"draining"`
+	// What this client joins, used to place the host in a cluster.
+	Region     string   `json:"region,omitempty"`
+	Datacenter string   `json:"datacenter,omitempty"`
+	Servers    []string `json:"servers,omitempty"`
 }
 
 type Sample struct {
